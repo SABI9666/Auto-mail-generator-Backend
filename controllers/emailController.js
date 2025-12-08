@@ -12,11 +12,13 @@ class EmailController {
         return res.status(400).json({ error: 'Gmail not connected' });
       }
 
-      const messages = await gmailService.listUnreadMessages(user.gmailAccessToken);
+      // FIX: Pass user.id instead of user.gmailAccessToken
+      const messages = await gmailService.listUnreadMessages(user.id);
       const draftsCreated = [];
 
       for (const message of messages) {
-        const emailData = await gmailService.getMessage(user.gmailAccessToken, message.id);
+        // FIX: Pass user.id instead of user.gmailAccessToken
+        const emailData = await gmailService.getMessage(user.id, message.id);
 
         const existingDraft = await Draft.findOne({
           where: { userId: user.id, originalEmailId: emailData.id }
@@ -82,15 +84,17 @@ class EmailController {
 
       const user = await User.findByPk(req.user.id);
 
+      // FIX: Pass user.id instead of user.gmailAccessToken
       await gmailService.sendReply(
-        user.gmailAccessToken,
+        user.id,
         draft.senderEmail,
         draft.subject,
         draft.draftBody,
         draft.threadId
       );
 
-      await gmailService.markAsRead(user.gmailAccessToken, draft.originalEmailId);
+      // FIX: Pass user.id instead of user.gmailAccessToken
+      await gmailService.markAsRead(user.id, draft.originalEmailId);
 
       draft.status = 'sent';
       draft.sentAt = new Date();
@@ -152,15 +156,17 @@ class EmailController {
 
       const user = await User.findByPk(req.user.id);
 
+      // FIX: Pass user.id instead of user.gmailAccessToken
       await gmailService.sendReply(
-        user.gmailAccessToken,
+        user.id,
         draft.senderEmail,
         draft.subject,
         editedBody,
         draft.threadId
       );
 
-      await gmailService.markAsRead(user.gmailAccessToken, draft.originalEmailId);
+      // FIX: Pass user.id instead of user.gmailAccessToken
+      await gmailService.markAsRead(user.id, draft.originalEmailId);
 
       draft.status = 'edited';
       draft.editedBody = editedBody;
@@ -186,3 +192,27 @@ class EmailController {
 }
 
 module.exports = new EmailController();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
