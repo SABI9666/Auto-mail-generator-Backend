@@ -8,6 +8,7 @@ const sequelize = require('./config/database');
 const authRoutes = require('./routes/auth');
 const emailRoutes = require('./routes/email');
 const whatsappRoutes = require('./routes/whatsapp');
+const statsRoutes = require('./routes/stats');
 
 // Initialize Express app
 const app = express();
@@ -54,6 +55,7 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/email', emailRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
+app.use('/api/stats', statsRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -64,7 +66,8 @@ app.get('/', (req, res) => {
       health: '/health',
       auth: '/api/auth',
       email: '/api/email',
-      whatsapp: '/api/whatsapp'
+      whatsapp: '/api/whatsapp',
+      stats: '/api/stats'
     }
   });
 });
@@ -74,7 +77,7 @@ app.use((req, res) => {
   res.status(404).json({
     error: 'Not Found',
     message: `Cannot ${req.method} ${req.path}`,
-    availableEndpoints: ['/health', '/api/auth', '/api/email', '/api/whatsapp']
+    availableEndpoints: ['/health', '/api/auth', '/api/email', '/api/whatsapp', '/api/stats']
   });
 });
 
@@ -146,3 +149,39 @@ process.on('SIGINT', async () => {
 });
 
 module.exports = app;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
