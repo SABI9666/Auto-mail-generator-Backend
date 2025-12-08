@@ -7,121 +7,127 @@ const oauth2Client = new google.auth.OAuth2(
   process.env.GMAIL_REDIRECT_URI
 );
 
-const SCOPES = [
-  'https://www.googleapis.com/auth/gmail.readonly',
-  'https://www.googleapis.com/auth/gmail.send',
-  'https://www.googleapis.com/auth/gmail.modify',
-  'https://www.googleapis.com/auth/gmail.compose'
-];
+class GmailService {
+  getAuthUrl(state) {
+    return oauth2Client.generateAuthUrl({
+      access_type: 'offline',
+      scope: ['https://www.googleapis.com/auth/gmail.modify'],
+      state: state
+    });
+  }
 
-const getAuthUrl = (state) => {
-  return oauth2Client.generateAuthUrl({
-    access_type: 'offline',
-    scope: SCOPES,
-    state: state,
-    prompt: 'consent'
-  });
-};
-
-const getTokens = async (code) => {
-  try {
+  async getTokens(code) {
     const { tokens } = await oauth2Client.getToken(code);
     return tokens;
-  } catch (error) {
-    console.error('Error getting tokens:', error);
-    throw new Error('Failed to exchange code for tokens');
   }
-};
 
-const getGmailClient = async (userId) => {
-  try {
+  async setCredentials(userId) {
     const user = await User.findByPk(userId);
     if (!user || !user.gmailAccessToken) {
-      throw new Error('Gmail not connected for this user');
+      throw new Error('Gmail not connected');
     }
+
     oauth2Client.setCredentials({
       access_token: user.gmailAccessToken,
       refresh_token: user.gmailRefreshToken,
-      expiry_date: user.gmailTokenExpiry ? new Date(user.gmailTokenExpiry).getTime() : null
+      expiry_date: user.gmailTokenExpiry
     });
-    if (!user.hasValidGmailToken() && user.gmailRefreshToken) {
-      console.log('Refreshing Gmail token for user:', userId);
-      const { credentials } = await oauth2Client.refreshAccessToken();
-      await user.update({
-        gmailAccessToken: credentials.access_token,
-        gmailRefreshToken: credentials.refresh_token || user.gmailRefreshToken,
-        gmailTokenExpiry: new Date(credentials.expiry_date)
-      });
-      console.log('Token refreshed successfully');
-    }
+
+    // Handle token refresh
+    oauth2Client.on('tokens', async (tokens) => {
+      if (tokens.refresh_token) {
+        await User.update(
+          {
+            gmailAccessToken: tokens.access_token,
+            gmailRefreshToken: tokens.refresh_token,
+            gmailTokenExpiry: tokens.expiry_date
+          },
+          { where: { id: userId } }
+        );
+      }
+    });
+
     return google.gmail({ version: 'v1', auth: oauth2Client });
-  } catch (error) {
-    console.error('Error getting Gmail client:', error);
-    throw error;
   }
-};
 
-const getUserEmail = async (userId) => {
-  try {
-    const gmail = await getGmailClient(userId);
-    const res = await gmail.users.getProfile({ userId: 'me' });
-    return res.data.emailAddress;
-  } catch (error) {
-    console.error('Error getting user email:', error);
-    throw error;
-  }
-};
+  // UPDATED: Filter to get ONLY inbox emails (no promotions, no spam, no social, etc.)
+  async listMessages(userId, maxResults = 10, timeFilter = null) {
+    const gmail = await this.setCredentials(userId);
+    
+    // Build query to get ONLY inbox emails
+    // Excludes: SPAM, PROMOTIONS, SOCIAL, UPDATES, FORUMS
+    let query = 'in:inbox -in:spam -in:promotions -in:social -in:updates -in:forums';
+    
+    // Add time filter if provided
+    if (timeFilter) {
+      const timestamp = Math.floor(timeFilter.getTime() / 1000);
+      query += ` after:${timestamp}`;
+    }
 
-const listMessages = async (userId, options = {}) => {
-  try {
-    const gmail = await getGmailClient(userId);
-    const params = {
+    console.log('Gmail search query:', query);
+
+    const response = await gmail.users.messages.list({
       userId: 'me',
-      maxResults: options.maxResults || 10,
-      labelIds: options.labelIds || ['INBOX'],
-      q: options.q || 'is:unread'
-    };
-    const res = await gmail.users.messages.list(params);
-    return res.data.messages || [];
-  } catch (error) {
-    console.error('Error listing messages:', error);
-    throw error;
+      q: query,
+      maxResults: maxResults
+    });
+
+    return response.data.messages || [];
   }
-};
 
-const listUnreadMessages = async (userId, options = {}) => {
-  return listMessages(userId, { ...options, q: 'is:unread' });
-};
+  // List unread inbox messages only
+  async listUnreadMessages(userId, timeFilter = null) {
+    const gmail = await this.setCredentials(userId);
+    
+    // Get ONLY unread inbox emails (no promotions/spam)
+    let query = 'is:unread in:inbox -in:spam -in:promotions -in:social -in:updates -in:forums';
+    
+    if (timeFilter) {
+      const timestamp = Math.floor(timeFilter.getTime() / 1000);
+      query += ` after:${timestamp}`;
+    }
 
-const getMessage = async (userId, messageId) => {
-  try {
-    const gmail = await getGmailClient(userId);
-    const res = await gmail.users.messages.get({
+    console.log('Gmail unread search query:', query);
+
+    const response = await gmail.users.messages.list({
+      userId: 'me',
+      q: query,
+      maxResults: 50 // Limit to prevent rate limit issues
+    });
+
+    return response.data.messages || [];
+  }
+
+  async getMessage(userId, messageId) {
+    const gmail = await this.setCredentials(userId);
+    const response = await gmail.users.messages.get({
       userId: 'me',
       id: messageId,
       format: 'full'
     });
-    
-    // Parse the message for easier use
-    const message = res.data;
+
+    const message = response.data;
     const headers = message.payload.headers;
-    
-    // Extract common headers
-    const from = headers.find(h => h.name.toLowerCase() === 'from')?.value || '';
-    const to = headers.find(h => h.name.toLowerCase() === 'to')?.value || '';
-    const subject = headers.find(h => h.name.toLowerCase() === 'subject')?.value || '';
-    
+
+    // Extract email data
+    const getHeader = (name) => headers.find(h => h.name.toLowerCase() === name.toLowerCase())?.value || '';
+
+    const from = getHeader('From');
+    const to = getHeader('To');
+    const subject = getHeader('Subject');
+    const date = getHeader('Date');
+
     // Extract body
     let body = '';
     if (message.payload.parts) {
-      const textPart = message.payload.parts.find(p => p.mimeType === 'text/plain');
+      const textPart = message.payload.parts.find(part => part.mimeType === 'text/plain');
       if (textPart && textPart.body.data) {
         body = Buffer.from(textPart.body.data, 'base64').toString('utf-8');
       }
-    } else if (message.payload.body && message.payload.body.data) {
+    } else if (message.payload.body.data) {
       body = Buffer.from(message.payload.body.data, 'base64').toString('utf-8');
     }
-    
+
     return {
       id: message.id,
       threadId: message.threadId,
@@ -129,60 +135,45 @@ const getMessage = async (userId, messageId) => {
       to,
       subject,
       body,
-      raw: message // Include raw for any special processing
+      date,
+      snippet: message.snippet
     };
-  } catch (error) {
-    console.error('Error getting message:', error);
-    throw error;
   }
-};
 
-const sendEmail = async (userId, emailData) => {
-  try {
-    const gmail = await getGmailClient(userId);
-    const user = await User.findByPk(userId);
-    const fromEmail = await getUserEmail(userId);
+  async sendEmail(userId, emailData) {
+    const gmail = await this.setCredentials(userId);
+    
+    const { to, subject, body, threadId } = emailData;
+    
     const email = [
-      `From: ${user.name} <${fromEmail}>`,
-      `To: ${emailData.to}`,
-      `Subject: ${emailData.subject}`,
-      emailData.inReplyTo ? `In-Reply-To: ${emailData.inReplyTo}` : '',
-      emailData.references ? `References: ${emailData.references}` : '',
-      'Content-Type: text/html; charset=utf-8',
+      `To: ${to}`,
+      `Subject: ${subject}`,
+      'Content-Type: text/plain; charset=utf-8',
       '',
-      emailData.body
-    ].filter(Boolean).join('\r\n');
+      body
+    ].join('\n');
+
     const encodedEmail = Buffer.from(email).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    const params = {
-      userId: 'me',
-      requestBody: {
-        raw: encodedEmail
-      }
-    };
-    if (emailData.threadId) {
-      params.requestBody.threadId = emailData.threadId;
+
+    const requestBody = { raw: encodedEmail };
+    if (threadId) {
+      requestBody.threadId = threadId;
     }
-    const res = await gmail.users.messages.send(params);
-    console.log('Email sent successfully:', res.data.id);
-    return res.data;
-  } catch (error) {
-    console.error('Error sending email:', error);
-    throw error;
+
+    const response = await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: requestBody
+    });
+
+    return response.data;
   }
-};
 
-const sendReply = async (userId, to, subject, body, threadId) => {
-  return sendEmail(userId, {
-    to,
-    subject: subject.startsWith('Re:') ? subject : `Re: ${subject}`,
-    body,
-    threadId
-  });
-};
+  async sendReply(userId, emailData) {
+    return await this.sendEmail(userId, emailData);
+  }
 
-const markAsRead = async (userId, messageId) => {
-  try {
-    const gmail = await getGmailClient(userId);
+  async markAsRead(userId, messageId) {
+    const gmail = await this.setCredentials(userId);
     await gmail.users.messages.modify({
       userId: 'me',
       id: messageId,
@@ -190,48 +181,18 @@ const markAsRead = async (userId, messageId) => {
         removeLabelIds: ['UNREAD']
       }
     });
-    console.log('Message marked as read:', messageId);
-  } catch (error) {
-    console.error('Error marking message as read:', error);
-    throw error;
   }
-};
+}
 
-const revokeAccess = async (userId) => {
-  try {
-    const user = await User.findByPk(userId);
-    if (user && user.gmailAccessToken) {
-      await oauth2Client.revokeToken(user.gmailAccessToken);
-      await user.update({
-        gmailAccessToken: null,
-        gmailRefreshToken: null,
-        gmailTokenExpiry: null
-      });
-      console.log('Gmail access revoked for user:', userId);
-    }
-  } catch (error) {
-    console.error('Error revoking Gmail access:', error);
-    await User.update(
-      { gmailAccessToken: null, gmailRefreshToken: null, gmailTokenExpiry: null },
-      { where: { id: userId } }
-    );
-  }
-};
+module.exports = new GmailService();
 
-module.exports = {
-  oauth2Client,
-  getAuthUrl,
-  getTokens,
-  getGmailClient,
-  getUserEmail,
-  listMessages,
-  listUnreadMessages,
-  getMessage,
-  sendEmail,
-  sendReply,
-  markAsRead,
-  revokeAccess
-};
+
+
+
+
+
+
+
 
 
 
