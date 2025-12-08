@@ -1,5 +1,4 @@
-backend/models/User.js
-javascriptconst { DataTypes } = require('sequelize');
+const { DataTypes } = require('sequelize');
 
 module.exports = (sequelize) => {
   const User = sequelize.define('User', {
@@ -37,7 +36,7 @@ module.exports = (sequelize) => {
       type: DataTypes.STRING,
       allowNull: true,
       validate: {
-        is: /^\+?[1-9]\d{1,14}$/  // E.164 format validation
+        is: /^\+?[1-9]\d{1,14}$/
       }
     },
     emailPreferences: {
@@ -49,7 +48,6 @@ module.exports = (sequelize) => {
         signature: ''
       }
     },
-    // Gmail OAuth tokens
     gmailAccessToken: {
       type: DataTypes.TEXT,
       allowNull: true
@@ -62,7 +60,6 @@ module.exports = (sequelize) => {
       type: DataTypes.DATE,
       allowNull: true
     },
-    // Gmail connection status
     isGmailConnected: {
       type: DataTypes.VIRTUAL,
       get() {
@@ -78,7 +75,6 @@ module.exports = (sequelize) => {
       }
     ],
     hooks: {
-      // Clean up tokens on user deletion
       beforeDestroy: async (user) => {
         user.gmailAccessToken = null;
         user.gmailRefreshToken = null;
@@ -87,10 +83,8 @@ module.exports = (sequelize) => {
     }
   });
 
-  // Instance methods
   User.prototype.toJSON = function() {
     const values = Object.assign({}, this.get());
-    // Never expose sensitive data
     delete values.password;
     delete values.gmailAccessToken;
     delete values.gmailRefreshToken;
@@ -101,7 +95,6 @@ module.exports = (sequelize) => {
     if (!this.gmailAccessToken || !this.gmailTokenExpiry) {
       return false;
     }
-    // Check if token is expired (with 5 minute buffer)
     return new Date(this.gmailTokenExpiry) > new Date(Date.now() + 5 * 60 * 1000);
   };
 
