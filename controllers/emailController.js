@@ -1,374 +1,357 @@
 const gmailService = require('../services/gmailService');
 const openaiService = require('../services/openaiService');
-const whatsappService = require('../services/whatsappService');
-const { Draft, EmailLog, User } = require('../models');
+const twilioService = require('../services/twilioService');
+const { Draft, User } = require('../models');
 const { Op } = require('sequelize');
 const crypto = require('crypto');
+
+// Helper function to delay execution (for rate limiting)
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Helper function to get date range based on period
 const getDateRange = (period) => {
   const now = new Date();
-  let startDate;
-  
-  switch(period) {
+  switch (period) {
     case 'day':
-      startDate = new Date(now - 24 * 60 * 60 * 1000); // Last 24 hours
-      break;
+      return new Date(now - 24 * 60 * 60 * 1000);
     case 'week':
-      startDate = new Date(now - 7 * 24 * 60 * 60 * 1000); // Last 7 days
-      break;
+      return new Date(now - 7 * 24 * 60 * 60 * 1000);
     case 'month':
-      startDate = new Date(now - 30 * 24 * 60 * 60 * 1000); // Last 30 days
-      break;
+      return new Date(now - 30 * 24 * 60 * 60 * 1000);
     default:
-      startDate = new Date(now - 24 * 60 * 60 * 1000); // Default to day
+      return new Date(now - 24 * 60 * 60 * 1000); // Default to 1 day
   }
-  
-  return startDate;
 };
 
-class EmailController {
-  async scanInbox(req, res) {
-    try {
-      const user = await User.findByPk(req.user.id);
-      
-      if (!user || !user.gmailAccessToken) {
-        return res.status(400).json({ error: 'Gmail not connected' });
-      }
+// SCAN INBOX - with rate limiting and max emails limit
+const scanInbox = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const period = req.query.period || 'day'; // day, week, or month
+    const maxEmails = 10; // MAX 10 emails per scan to avoid rate limits
+    const delayBetweenCalls = 21000; // 21 seconds between OpenAI calls (3 per minute limit)
 
-      // Get period from query params (day, week, month)
-      const period = req.query.period || 'day';
+    const user = await User.findByPk(userId);
+    if (!user || !user.gmailAccessToken) {
+      return res.status(400).json({ error: 'Gmail not connected' });
+    }
+
+    // Get time filter
+    const startDate = getDateRange(period);
+    console.log(`Scanning inbox for period: ${period}, from: ${startDate}`);
+
+    // Get unread messages with time filter
+    const messages = await gmailService.listUnreadMessages(userId, startDate);
+    
+    if (!messages || messages.length === 0) {
+      return res.json({ message: 'No new messages found', draftsCreated: 0 });
+    }
+
+    console.log(`Found ${messages.length} unread emails. Processing max ${maxEmails}...`);
+
+    // LIMIT to max emails to prevent rate limit
+    const messagesToProcess = messages.slice(0, maxEmails);
+    let draftsCreated = 0;
+    let errors = 0;
+
+    for (let i = 0; i < messagesToProcess.length; i++) {
+      try {
+        const msg = messagesToProcess[i];
+        
+        // Check if draft already exists for this email
+        const existingDraft = await Draft.findOne({ 
+          where: { emailId: msg.id, userId } 
+        });
+        
+        if (existingDraft) {
+          console.log(`Draft already exists for email ${msg.id}, skipping...`);
+          continue;
+        }
+
+        // Get full message details
+        const messageData = await gmailService.getMessage(userId, msg.id);
+
+        // Generate AI reply
+        console.log(`Generating AI reply for email ${i + 1}/${messagesToProcess.length}...`);
+        const aiReply = await openaiService.generateReply(
+          messageData.body,
+          user.emailPreferences
+        );
+        console.log('✅ AI reply generated successfully');
+
+        // Generate approval token
+        const approvalToken = crypto.randomBytes(16).toString('hex');
+
+        // Create draft
+        const draft = await Draft.create({
+          userId: userId,
+          emailId: messageData.id,
+          threadId: messageData.threadId,
+          from: messageData.to, // User's email
+          to: messageData.from, // Sender's email
+          subject: `Re: ${messageData.subject}`,
+          originalBody: messageData.body,
+          generatedReply: aiReply,
+          status: 'pending',
+          approvalToken: approvalToken
+        });
+
+        draftsCreated++;
+
+        // Send WhatsApp notification
+        if (user.whatsappNumber) {
+          const whatsappMessage = `
+📧 New Email Draft Created
+
+From: ${messageData.from}
+Subject: ${messageData.subject}
+
+Original: ${messageData.snippet || messageData.body.substring(0, 100)}...
+
+AI Reply: ${aiReply.substring(0, 200)}...
+
+To approve, reply: approve ${draft.id}
+To reject, reply: reject ${draft.id}
+To edit, reply: edit ${draft.id} <your changes>
+
+View all drafts: ${process.env.FRONTEND_URL}/drafts
+          `.trim();
+
+          await twilioService.sendWhatsAppMessage(user.whatsappNumber, whatsappMessage);
+          console.log('WhatsApp notification sent for draft:', draft.id);
+        }
+
+        // RATE LIMITING: Wait 21 seconds before next OpenAI call
+        // This ensures we stay under 3 requests per minute
+        if (i < messagesToProcess.length - 1) {
+          console.log(`Waiting 21 seconds before processing next email (rate limit protection)...`);
+          await delay(delayBetweenCalls);
+        }
+
+      } catch (error) {
+        console.error('Error processing message:', error);
+        errors++;
+        // Continue processing other messages even if one fails
+      }
+    }
+
+    const skipped = messages.length - maxEmails;
+    res.json({ 
+      message: 'Inbox scan completed', 
+      draftsCreated,
+      errors,
+      totalFound: messages.length,
+      processed: messagesToProcess.length,
+      skipped: skipped > 0 ? skipped : 0,
+      note: skipped > 0 ? `Limited to ${maxEmails} emails to prevent rate limits. Run scan again to process more.` : null
+    });
+
+  } catch (error) {
+    console.error('Scan inbox error:', error);
+    res.status(500).json({ error: 'Failed to scan inbox', message: error.message });
+  }
+};
+
+// GET PENDING DRAFTS with time filter
+const getPendingDrafts = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const period = req.query.period || 'week';
+    const startDate = getDateRange(period);
+
+    const drafts = await Draft.findAll({
+      where: {
+        userId,
+        status: 'pending',
+        createdAt: { [Op.gte]: startDate }
+      },
+      order: [['createdAt', 'DESC']]
+    });
+
+    res.json(drafts);
+  } catch (error) {
+    console.error('Get pending drafts error:', error);
+    res.status(500).json({ error: 'Failed to fetch pending drafts' });
+  }
+};
+
+// GET ALL DRAFTS with filters
+const getAllDrafts = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { status, period } = req.query;
+    
+    const where = { userId };
+    
+    if (status) {
+      where.status = status;
+    }
+    
+    if (period) {
       const startDate = getDateRange(period);
-      
-      // Build search query for Gmail
-      const searchQuery = `is:unread after:${Math.floor(startDate.getTime() / 1000)}`;
-
-      const messages = await gmailService.listUnreadMessages(user.id, {
-        q: searchQuery,
-        maxResults: 20
-      });
-      
-      if (!messages || messages.length === 0) {
-        return res.json({ 
-          success: true,
-          message: `No unread emails found in the last ${period}`,
-          draftsCreated: 0,
-          drafts: []
-        });
-      }
-
-      const draftsCreated = [];
-
-      for (const message of messages) {
-        try {
-          const emailData = await gmailService.getMessage(user.id, message.id);
-
-          // Check if draft already exists
-          const existingDraft = await Draft.findOne({
-            where: { userId: user.id, emailId: emailData.id }
-          });
-
-          if (existingDraft) continue;
-
-          // Generate AI reply
-          const draftBody = await openaiService.generateReply(emailData, user.emailPreferences);
-
-          // Generate approval token
-          const approvalToken = crypto.randomBytes(16).toString('hex');
-
-          // Create draft
-          const draft = await Draft.create({
-            userId: user.id,
-            emailId: emailData.id,
-            threadId: emailData.threadId,
-            from: emailData.to,
-            to: emailData.from,
-            subject: emailData.subject.startsWith('Re:') ? emailData.subject : `Re: ${emailData.subject}`,
-            originalBody: emailData.body,
-            generatedReply: draftBody,
-            status: 'pending',
-            approvalToken
-          });
-
-          draftsCreated.push(draft);
-
-          // Send WhatsApp notification
-          if (user.whatsappNumber) {
-            try {
-              await whatsappService.sendDraftApproval(user.whatsappNumber, draft);
-              console.log('WhatsApp notification sent for draft:', draft.id);
-            } catch (err) {
-              console.error('WhatsApp error:', err);
-            }
-          }
-
-          // Log the action
-          if (EmailLog) {
-            await EmailLog.create({
-              userId: user.id,
-              draftId: draft.id,
-              action: 'draft_created',
-              emailProvider: 'gmail'
-            });
-          }
-        } catch (messageError) {
-          console.error('Error processing message:', messageError);
-          // Continue with next message
-        }
-      }
-
-      res.json({ 
-        success: true, 
-        message: `Scanned ${messages.length} emails from the last ${period}`,
-        draftsCreated: draftsCreated.length, 
-        drafts: draftsCreated.map(d => ({
-          id: d.id,
-          from: d.to,
-          subject: d.subject,
-          status: d.status,
-          createdAt: d.createdAt
-        }))
-      });
-    } catch (error) {
-      console.error('Scan Error:', error);
-      res.status(500).json({ error: 'Failed to scan inbox', message: error.message });
+      where.createdAt = { [Op.gte]: startDate };
     }
+
+    const drafts = await Draft.findAll({
+      where,
+      order: [['createdAt', 'DESC']]
+    });
+
+    res.json(drafts);
+  } catch (error) {
+    console.error('Get drafts error:', error);
+    res.status(500).json({ error: 'Failed to fetch drafts' });
   }
+};
 
-  async getPendingDrafts(req, res) {
-    try {
-      const period = req.query.period;
-      
-      const where = { 
-        userId: req.user.id, 
-        status: 'pending'
-      };
-      
-      // Add date filter if period is specified
-      if (period) {
-        const startDate = getDateRange(period);
-        where.createdAt = { [Op.gte]: startDate };
-      }
+// GET SINGLE DRAFT
+const getDraft = async (req, res) => {
+  try {
+    const { draftId } = req.params;
+    const userId = req.user.id;
 
-      const drafts = await Draft.findAll({
-        where,
-        order: [['createdAt', 'DESC']]
-      });
+    const draft = await Draft.findOne({
+      where: { id: draftId, userId }
+    });
 
-      res.json({ success: true, count: drafts.length, drafts });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to retrieve drafts' });
+    if (!draft) {
+      return res.status(404).json({ error: 'Draft not found' });
     }
+
+    res.json(draft);
+  } catch (error) {
+    console.error('Get draft error:', error);
+    res.status(500).json({ error: 'Failed to fetch draft' });
   }
+};
 
-  async getAllDrafts(req, res) {
-    try {
-      const { status, period } = req.query;
-      
-      const where = { userId: req.user.id };
-      
-      // Add status filter
-      if (status) {
-        where.status = status;
-      }
-      
-      // Add date filter
-      if (period) {
-        const startDate = getDateRange(period);
-        where.createdAt = { [Op.gte]: startDate };
-      }
+// APPROVE DRAFT
+const approveDraft = async (req, res) => {
+  try {
+    const { draftId } = req.params;
+    const userId = req.user.id;
 
-      const drafts = await Draft.findAll({
-        where,
-        order: [['createdAt', 'DESC']]
-      });
+    const draft = await Draft.findOne({
+      where: { id: draftId, userId }
+    });
 
-      res.json({ success: true, count: drafts.length, drafts });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to retrieve drafts' });
+    if (!draft) {
+      return res.status(404).json({ error: 'Draft not found' });
     }
-  }
 
-  async getDraft(req, res) {
-    try {
-      const { draftId } = req.params;
-      const draft = await Draft.findOne({
-        where: { id: draftId, userId: req.user.id }
-      });
+    // Send the email
+    await gmailService.sendReply(userId, {
+      to: draft.to,
+      subject: draft.subject,
+      body: draft.generatedReply,
+      threadId: draft.threadId
+    });
 
-      if (!draft) {
-        return res.status(404).json({ error: 'Draft not found' });
-      }
+    // Mark original email as read
+    await gmailService.markAsRead(userId, draft.emailId);
 
-      res.json({ success: true, draft });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to retrieve draft' });
+    // Update draft status
+    draft.status = 'sent';
+    draft.sentAt = new Date();
+    await draft.save();
+
+    // Send confirmation via WhatsApp
+    const user = await User.findByPk(userId);
+    if (user.whatsappNumber) {
+      await twilioService.sendWhatsAppMessage(
+        user.whatsappNumber,
+        `✅ Email sent successfully!\n\nTo: ${draft.to}\nSubject: ${draft.subject}`
+      );
     }
+
+    res.json({ message: 'Draft approved and email sent', draft });
+  } catch (error) {
+    console.error('Approve draft error:', error);
+    res.status(500).json({ error: 'Failed to approve draft', message: error.message });
   }
+};
 
-  async approveDraft(req, res) {
-    try {
-      const { draftId } = req.params;
-      const draft = await Draft.findOne({ where: { id: draftId, userId: req.user.id } });
+// REJECT DRAFT
+const rejectDraft = async (req, res) => {
+  try {
+    const { draftId } = req.params;
+    const userId = req.user.id;
 
-      if (!draft) return res.status(404).json({ error: 'Draft not found' });
+    const draft = await Draft.findOne({
+      where: { id: draftId, userId }
+    });
 
-      const user = await User.findByPk(req.user.id);
-
-      // Send email
-      await gmailService.sendEmail(user.id, {
-        to: draft.to,
-        subject: draft.subject,
-        body: draft.generatedReply,
-        threadId: draft.threadId
-      });
-
-      // Mark original email as read
-      await gmailService.markAsRead(user.id, draft.emailId);
-
-      // Update draft status
-      draft.status = 'sent';
-      draft.sentAt = new Date();
-      await draft.save();
-
-      // Send WhatsApp confirmation
-      if (user.whatsappNumber) {
-        try {
-          await whatsappService.sendConfirmation(user.whatsappNumber, 'sent', draft.id);
-        } catch (err) {
-          console.error('WhatsApp error:', err);
-        }
-      }
-
-      // Log the action
-      if (EmailLog) {
-        await EmailLog.create({
-          userId: user.id,
-          draftId: draft.id,
-          action: 'sent',
-          emailProvider: 'gmail'
-        });
-      }
-
-      res.json({ success: true, message: 'Email sent successfully', draft });
-    } catch (error) {
-      console.error('Approve Error:', error);
-      res.status(500).json({ error: 'Failed to send email' });
+    if (!draft) {
+      return res.status(404).json({ error: 'Draft not found' });
     }
+
+    draft.status = 'rejected';
+    await draft.save();
+
+    res.json({ message: 'Draft rejected', draft });
+  } catch (error) {
+    console.error('Reject draft error:', error);
+    res.status(500).json({ error: 'Failed to reject draft' });
   }
+};
 
-  async rejectDraft(req, res) {
-    try {
-      const { draftId } = req.params;
-      const draft = await Draft.findOne({ where: { id: draftId, userId: req.user.id } });
+// EDIT AND SEND DRAFT
+const editDraft = async (req, res) => {
+  try {
+    const { draftId } = req.params;
+    const { editedBody } = req.body;
+    const userId = req.user.id;
 
-      if (!draft) return res.status(404).json({ error: 'Draft not found' });
+    const draft = await Draft.findOne({
+      where: { id: draftId, userId }
+    });
 
-      draft.status = 'rejected';
-      await draft.save();
-
-      const user = await User.findByPk(req.user.id);
-      if (user.whatsappNumber) {
-        try {
-          await whatsappService.sendConfirmation(user.whatsappNumber, 'rejected', draft.id);
-        } catch (err) {
-          console.error('WhatsApp error:', err);
-        }
-      }
-
-      if (EmailLog) {
-        await EmailLog.create({
-          userId: user.id,
-          draftId: draft.id,
-          action: 'rejected',
-          emailProvider: 'gmail'
-        });
-      }
-
-      res.json({ success: true, message: 'Draft rejected' });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to reject draft' });
+    if (!draft) {
+      return res.status(404).json({ error: 'Draft not found' });
     }
-  }
 
-  async editDraft(req, res) {
-    try {
-      const { draftId } = req.params;
-      const { editedBody } = req.body;
+    // Update draft with edited content
+    draft.generatedReply = editedBody;
+    await draft.save();
 
-      const draft = await Draft.findOne({ where: { id: draftId, userId: req.user.id } });
-      if (!draft) return res.status(404).json({ error: 'Draft not found' });
+    // Send the edited email
+    await gmailService.sendReply(userId, {
+      to: draft.to,
+      subject: draft.subject,
+      body: editedBody,
+      threadId: draft.threadId
+    });
 
-      const user = await User.findByPk(req.user.id);
+    // Mark original as read
+    await gmailService.markAsRead(userId, draft.emailId);
 
-      // Send edited email
-      await gmailService.sendEmail(user.id, {
-        to: draft.to,
-        subject: draft.subject,
-        body: editedBody,
-        threadId: draft.threadId
-      });
+    // Update status
+    draft.status = 'sent';
+    draft.sentAt = new Date();
+    await draft.save();
 
-      // Mark original email as read
-      await gmailService.markAsRead(user.id, draft.emailId);
-
-      draft.status = 'edited';
-      draft.generatedReply = editedBody;
-      draft.sentAt = new Date();
-      await draft.save();
-
-      if (user.whatsappNumber) {
-        try {
-          await whatsappService.sendConfirmation(user.whatsappNumber, 'edited', draft.id);
-        } catch (err) {
-          console.error('WhatsApp error:', err);
-        }
-      }
-
-      if (EmailLog) {
-        await EmailLog.create({
-          userId: user.id,
-          draftId: draft.id,
-          action: 'sent',
-          emailProvider: 'gmail'
-        });
-      }
-
-      res.json({ success: true, message: 'Edited email sent', draft });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to send edited email' });
+    // Send confirmation
+    const user = await User.findByPk(userId);
+    if (user.whatsappNumber) {
+      await twilioService.sendWhatsAppMessage(
+        user.whatsappNumber,
+        `✅ Edited email sent successfully!\n\nTo: ${draft.to}\nSubject: ${draft.subject}`
+      );
     }
+
+    res.json({ message: 'Draft edited and sent', draft });
+  } catch (error) {
+    console.error('Edit draft error:', error);
+    res.status(500).json({ error: 'Failed to edit and send draft' });
   }
-}
+};
 
-module.exports = new EmailController();
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+module.exports = {
+  scanInbox,
+  getPendingDrafts,
+  getAllDrafts,
+  getDraft,
+  approveDraft,
+  rejectDraft,
+  editDraft
+};
