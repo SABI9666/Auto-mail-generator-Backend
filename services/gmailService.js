@@ -89,6 +89,10 @@ const listMessages = async (userId, options = {}) => {
   }
 };
 
+const listUnreadMessages = async (userId, options = {}) => {
+  return listMessages(userId, { ...options, q: 'is:unread' });
+};
+
 const getMessage = async (userId, messageId) => {
   try {
     const gmail = await getGmailClient(userId);
@@ -183,11 +187,18 @@ module.exports = {
   getGmailClient,
   getUserEmail,
   listMessages,
+  listUnreadMessages,
   getMessage,
   sendEmail,
   markAsRead,
   revokeAccess
 };
+
+
+
+
+
+
 
 
 
