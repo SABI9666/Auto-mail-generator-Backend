@@ -1,60 +1,93 @@
 const { DataTypes } = require('sequelize');
-const sequelize = require('../config/database');
-const User = require('./User');
 
-const Draft = sequelize.define('Draft', {
-  id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
-    primaryKey: true
-  },
-  userId: {
-    type: DataTypes.UUID,
-    references: { model: User, key: 'id' }
-  },
-  emailProvider: {
-    type: DataTypes.ENUM('gmail', 'outlook'),
-    allowNull: false
-  },
-  originalEmailId: {
-    type: DataTypes.STRING,
-    allowNull: false
-  },
-  threadId: {
-    type: DataTypes.STRING
-  },
-  senderEmail: {
-    type: DataTypes.STRING,
-    allowNull: false
-  },
-  subject: {
-    type: DataTypes.STRING,
-    allowNull: false
-  },
-  originalBody: {
-    type: DataTypes.TEXT,
-    allowNull: false
-  },
-  draftBody: {
-    type: DataTypes.TEXT,
-    allowNull: false
-  },
-  status: {
-    type: DataTypes.ENUM('pending', 'approved', 'rejected', 'edited', 'sent'),
-    defaultValue: 'pending'
-  },
-  editedBody: {
-    type: DataTypes.TEXT
-  },
-  sentAt: {
-    type: DataTypes.DATE
-  },
-  whatsappMessageSid: {
-    type: DataTypes.STRING
-  }
-});
+module.exports = (sequelize) => {
+  const Draft = sequelize.define('Draft', {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true
+    },
+    userId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: {
+        model: 'Users',
+        key: 'id'
+      }
+    },
+    emailId: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    threadId: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    from: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    to: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    subject: {
+      type: DataTypes.TEXT,
+      allowNull: false
+    },
+    originalBody: {
+      type: DataTypes.TEXT,
+      allowNull: false
+    },
+    generatedReply: {
+      type: DataTypes.TEXT,
+      allowNull: false
+    },
+    status: {
+      type: DataTypes.ENUM('pending', 'approved', 'rejected', 'sent'),
+      defaultValue: 'pending',
+      allowNull: false
+    },
+    approvalToken: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      unique: true
+    },
+    sentAt: {
+      type: DataTypes.DATE,
+      allowNull: true
+    }
+  }, {
+    timestamps: true,
+    indexes: [
+      {
+        fields: ['userId']
+      },
+      {
+        fields: ['status']
+      },
+      {
+        fields: ['emailId']
+      },
+      {
+        fields: ['approvalToken']
+      }
+    ]
+  });
 
-User.hasMany(Draft, { foreignKey: 'userId' });
-Draft.belongsTo(User, { foreignKey: 'userId' });
+  return Draft;
+};
 
-module.exports = Draft;
+
+
+
+
+
+
+
+
+
+
+
+
+
