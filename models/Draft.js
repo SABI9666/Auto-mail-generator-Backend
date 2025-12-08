@@ -3,12 +3,12 @@ const { DataTypes } = require('sequelize');
 module.exports = (sequelize) => {
   const Draft = sequelize.define('Draft', {
     id: {
-      type: DataTypes.INTEGER,
-      primaryKey: true,
-      autoIncrement: true
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true
     },
     userId: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.UUID,
       allowNull: false,
       references: {
         model: 'Users',
@@ -44,7 +44,7 @@ module.exports = (sequelize) => {
       allowNull: false
     },
     status: {
-      type: DataTypes.ENUM('pending', 'approved', 'rejected', 'sent'),
+      type: DataTypes.ENUM('pending', 'approved', 'rejected', 'sent', 'edited'),
       defaultValue: 'pending',
       allowNull: false
     },
@@ -77,6 +77,22 @@ module.exports = (sequelize) => {
 
   return Draft;
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
