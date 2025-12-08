@@ -103,11 +103,10 @@ const startServer = async () => {
     await sequelize.authenticate();
     console.log('✅ Database connected');
 
-    // FORCE SYNC - Drop and recreate tables with UUID ids
-    // WARNING: This will delete all data!
-    // Change to { alter: true, force: false } after first successful deployment
-    await sequelize.sync({ force: true });
-    console.log('✅ Database synced - tables recreated with UUID ids');
+    // Sync database - ALTER mode (safe for production)
+    // Tables already created with UUID ids from previous force sync
+    await sequelize.sync({ alter: true, force: false });
+    console.log('✅ Database synced');
 
     // Start server
     app.listen(PORT, '0.0.0.0', () => {
@@ -154,6 +153,8 @@ process.on('SIGINT', async () => {
 });
 
 module.exports = app;
+
+
 
 
 
