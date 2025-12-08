@@ -12,46 +12,52 @@ class EmailController {
         return res.status(400).json({ error: 'Gmail not connected' });
       }
 
-      // FIX: Pass user.id instead of user.gmailAccessToken
       const messages = await gmailService.listUnreadMessages(user.id);
       const draftsCreated = [];
 
       for (const message of messages) {
-        // FIX: Pass user.id instead of user.gmailAccessToken
         const emailData = await gmailService.getMessage(user.id, message.id);
 
+        // FIX: Use emailId instead of originalEmailId
         const existingDraft = await Draft.findOne({
-          where: { userId: user.id, originalEmailId: emailData.id }
+          where: { userId: user.id, emailId: emailData.id }
         });
 
         if (existingDraft) continue;
 
         const draftBody = await openaiService.generateReply(emailData, user.emailPreferences);
 
+        // FIX: Match Draft model field names
         const draft = await Draft.create({
           userId: user.id,
-          emailProvider: 'gmail',
-          originalEmailId: emailData.id,
+          emailId: emailData.id,              // NOT originalEmailId
           threadId: emailData.threadId,
-          senderEmail: emailData.from,
+          from: emailData.to,                  // from = our email
+          to: emailData.from,                  // to = sender's email (reply to)
           subject: emailData.subject,
           originalBody: emailData.body,
-          draftBody: draftBody,
+          generatedReply: draftBody,          // NOT draftBody
           status: 'pending'
         });
 
         if (user.whatsappNumber) {
-          const messageSid = await whatsappService.sendDraftApproval(user.whatsappNumber, draft);
-          draft.whatsappMessageSid = messageSid;
-          await draft.save();
+          try {
+            const messageSid = await whatsappService.sendDraftApproval(user.whatsappNumber, draft);
+            // Note: Draft model doesn't have whatsappMessageSid field
+            console.log('WhatsApp message sent:', messageSid);
+          } catch (err) {
+            console.error('WhatsApp error:', err);
+          }
         }
 
-        await EmailLog.create({
-          userId: user.id,
-          draftId: draft.id,
-          action: 'draft_created',
-          emailProvider: 'gmail'
-        });
+        if (EmailLog) {
+          await EmailLog.create({
+            userId: user.id,
+            draftId: draft.id,
+            action: 'draft_created',
+            emailProvider: 'gmail'
+          });
+        }
 
         draftsCreated.push(draft);
       }
@@ -59,7 +65,7 @@ class EmailController {
       res.json({ success: true, draftsCreated: draftsCreated.length, drafts: draftsCreated });
     } catch (error) {
       console.error('Scan Error:', error);
-      res.status(500).json({ error: 'Failed to scan inbox' });
+      res.status(500).json({ error: 'Failed to scan inbox', message: error.message });
     }
   }
 
@@ -84,32 +90,37 @@ class EmailController {
 
       const user = await User.findByPk(req.user.id);
 
-      // FIX: Pass user.id instead of user.gmailAccessToken
-      await gmailService.sendReply(
-        user.id,
-        draft.senderEmail,
-        draft.subject,
-        draft.draftBody,
-        draft.threadId
-      );
+      // Send email using generatedReply field
+      await gmailService.sendEmail(user.id, {
+        to: draft.to,
+        subject: draft.subject,
+        body: draft.generatedReply,
+        threadId: draft.threadId
+      });
 
-      // FIX: Pass user.id instead of user.gmailAccessToken
-      await gmailService.markAsRead(user.id, draft.originalEmailId);
+      // Mark original email as read
+      await gmailService.markAsRead(user.id, draft.emailId);
 
       draft.status = 'sent';
       draft.sentAt = new Date();
       await draft.save();
 
       if (user.whatsappNumber) {
-        await whatsappService.sendConfirmation(user.whatsappNumber, 'sent', draft.id);
+        try {
+          await whatsappService.sendConfirmation(user.whatsappNumber, 'sent', draft.id);
+        } catch (err) {
+          console.error('WhatsApp error:', err);
+        }
       }
 
-      await EmailLog.create({
-        userId: user.id,
-        draftId: draft.id,
-        action: 'sent',
-        emailProvider: 'gmail'
-      });
+      if (EmailLog) {
+        await EmailLog.create({
+          userId: user.id,
+          draftId: draft.id,
+          action: 'sent',
+          emailProvider: 'gmail'
+        });
+      }
 
       res.json({ success: true, message: 'Email sent successfully' });
     } catch (error) {
@@ -130,15 +141,21 @@ class EmailController {
 
       const user = await User.findByPk(req.user.id);
       if (user.whatsappNumber) {
-        await whatsappService.sendConfirmation(user.whatsappNumber, 'rejected', draft.id);
+        try {
+          await whatsappService.sendConfirmation(user.whatsappNumber, 'rejected', draft.id);
+        } catch (err) {
+          console.error('WhatsApp error:', err);
+        }
       }
 
-      await EmailLog.create({
-        userId: user.id,
-        draftId: draft.id,
-        action: 'rejected',
-        emailProvider: 'gmail'
-      });
+      if (EmailLog) {
+        await EmailLog.create({
+          userId: user.id,
+          draftId: draft.id,
+          action: 'rejected',
+          emailProvider: 'gmail'
+        });
+      }
 
       res.json({ success: true, message: 'Draft rejected' });
     } catch (error) {
@@ -156,33 +173,38 @@ class EmailController {
 
       const user = await User.findByPk(req.user.id);
 
-      // FIX: Pass user.id instead of user.gmailAccessToken
-      await gmailService.sendReply(
-        user.id,
-        draft.senderEmail,
-        draft.subject,
-        editedBody,
-        draft.threadId
-      );
+      // Send edited email
+      await gmailService.sendEmail(user.id, {
+        to: draft.to,
+        subject: draft.subject,
+        body: editedBody,
+        threadId: draft.threadId
+      });
 
-      // FIX: Pass user.id instead of user.gmailAccessToken
-      await gmailService.markAsRead(user.id, draft.originalEmailId);
+      // Mark original email as read
+      await gmailService.markAsRead(user.id, draft.emailId);
 
       draft.status = 'edited';
-      draft.editedBody = editedBody;
+      draft.generatedReply = editedBody; // Update with edited version
       draft.sentAt = new Date();
       await draft.save();
 
       if (user.whatsappNumber) {
-        await whatsappService.sendConfirmation(user.whatsappNumber, 'edited', draft.id);
+        try {
+          await whatsappService.sendConfirmation(user.whatsappNumber, 'edited', draft.id);
+        } catch (err) {
+          console.error('WhatsApp error:', err);
+        }
       }
 
-      await EmailLog.create({
-        userId: user.id,
-        draftId: draft.id,
-        action: 'sent',
-        emailProvider: 'gmail'
-      });
+      if (EmailLog) {
+        await EmailLog.create({
+          userId: user.id,
+          draftId: draft.id,
+          action: 'sent',
+          emailProvider: 'gmail'
+        });
+      }
 
       res.json({ success: true, message: 'Edited email sent' });
     } catch (error) {
@@ -192,6 +214,8 @@ class EmailController {
 }
 
 module.exports = new EmailController();
+
+
 
 
 
