@@ -101,7 +101,36 @@ const getMessage = async (userId, messageId) => {
       id: messageId,
       format: 'full'
     });
-    return res.data;
+    
+    // Parse the message for easier use
+    const message = res.data;
+    const headers = message.payload.headers;
+    
+    // Extract common headers
+    const from = headers.find(h => h.name.toLowerCase() === 'from')?.value || '';
+    const to = headers.find(h => h.name.toLowerCase() === 'to')?.value || '';
+    const subject = headers.find(h => h.name.toLowerCase() === 'subject')?.value || '';
+    
+    // Extract body
+    let body = '';
+    if (message.payload.parts) {
+      const textPart = message.payload.parts.find(p => p.mimeType === 'text/plain');
+      if (textPart && textPart.body.data) {
+        body = Buffer.from(textPart.body.data, 'base64').toString('utf-8');
+      }
+    } else if (message.payload.body && message.payload.body.data) {
+      body = Buffer.from(message.payload.body.data, 'base64').toString('utf-8');
+    }
+    
+    return {
+      id: message.id,
+      threadId: message.threadId,
+      from,
+      to,
+      subject,
+      body,
+      raw: message // Include raw for any special processing
+    };
   } catch (error) {
     console.error('Error getting message:', error);
     throw error;
@@ -140,6 +169,15 @@ const sendEmail = async (userId, emailData) => {
     console.error('Error sending email:', error);
     throw error;
   }
+};
+
+const sendReply = async (userId, to, subject, body, threadId) => {
+  return sendEmail(userId, {
+    to,
+    subject: subject.startsWith('Re:') ? subject : `Re: ${subject}`,
+    body,
+    threadId
+  });
 };
 
 const markAsRead = async (userId, messageId) => {
@@ -190,9 +228,16 @@ module.exports = {
   listUnreadMessages,
   getMessage,
   sendEmail,
+  sendReply,
   markAsRead,
   revokeAccess
 };
+
+
+
+
+
+
 
 
 
