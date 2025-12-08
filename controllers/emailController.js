@@ -98,9 +98,10 @@ const scanInbox = async (req, res) => {
 
         draftsCreated++;
 
-        // Send WhatsApp notification
+        // Send WhatsApp notification (non-blocking - don't fail if WhatsApp fails)
         if (user.whatsappNumber) {
-          const whatsappMessage = `
+          try {
+            const whatsappMessage = `
 📧 New Email Draft Created
 
 From: ${messageData.from}
@@ -117,8 +118,16 @@ To edit, reply: edit ${draft.id} <your changes>
 View all drafts: ${process.env.FRONTEND_URL}/drafts
           `.trim();
 
-          await twilioService.sendWhatsAppMessage(user.whatsappNumber, whatsappMessage);
-          console.log('WhatsApp notification sent for draft:', draft.id);
+            const result = await twilioService.sendWhatsAppMessage(user.whatsappNumber, whatsappMessage);
+            if (result.success) {
+              console.log('WhatsApp notification sent for draft:', draft.id);
+            } else {
+              console.log('WhatsApp notification failed (non-critical):', result.message || result.error);
+            }
+          } catch (whatsappError) {
+            // Don't fail the entire process if WhatsApp fails
+            console.error('WhatsApp error (non-critical):', whatsappError.message);
+          }
         }
 
         // RATE LIMITING: Wait 21 seconds before next OpenAI call
@@ -255,13 +264,17 @@ const approveDraft = async (req, res) => {
     draft.sentAt = new Date();
     await draft.save();
 
-    // Send confirmation via WhatsApp
+    // Send confirmation via WhatsApp (non-blocking)
     const user = await User.findByPk(userId);
-    if (user.whatsappNumber) {
-      await twilioService.sendWhatsAppMessage(
-        user.whatsappNumber,
-        `✅ Email sent successfully!\n\nTo: ${draft.to}\nSubject: ${draft.subject}`
-      );
+    if (user && user.whatsappNumber) {
+      try {
+        await twilioService.sendWhatsAppMessage(
+          user.whatsappNumber,
+          `✅ Email sent successfully!\n\nTo: ${draft.to}\nSubject: ${draft.subject}`
+        );
+      } catch (whatsappError) {
+        console.error('WhatsApp confirmation error (non-critical):', whatsappError.message);
+      }
     }
 
     res.json({ message: 'Draft approved and email sent', draft });
@@ -330,13 +343,17 @@ const editDraft = async (req, res) => {
     draft.sentAt = new Date();
     await draft.save();
 
-    // Send confirmation
+    // Send confirmation (non-blocking)
     const user = await User.findByPk(userId);
-    if (user.whatsappNumber) {
-      await twilioService.sendWhatsAppMessage(
-        user.whatsappNumber,
-        `✅ Edited email sent successfully!\n\nTo: ${draft.to}\nSubject: ${draft.subject}`
-      );
+    if (user && user.whatsappNumber) {
+      try {
+        await twilioService.sendWhatsAppMessage(
+          user.whatsappNumber,
+          `✅ Edited email sent successfully!\n\nTo: ${draft.to}\nSubject: ${draft.subject}`
+        );
+      } catch (whatsappError) {
+        console.error('WhatsApp confirmation error (non-critical):', whatsappError.message);
+      }
     }
 
     res.json({ message: 'Draft edited and sent', draft });
@@ -355,3 +372,39 @@ module.exports = {
   rejectDraft,
   editDraft
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
