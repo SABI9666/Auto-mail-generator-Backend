@@ -7,8 +7,6 @@ const sequelize = require('./config/database');
 // Import routes
 const authRoutes = require('./routes/auth');
 const emailRoutes = require('./routes/email');
-const draftRoutes = require('./routes/drafts');
-const statsRoutes = require('./routes/stats');
 const whatsappRoutes = require('./routes/whatsapp');
 
 // Initialize Express app
@@ -55,8 +53,6 @@ app.get('/health', (req, res) => {
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/email', emailRoutes);
-app.use('/api/drafts', draftRoutes);
-app.use('/api/stats', statsRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
 
 // Root endpoint
@@ -68,8 +64,6 @@ app.get('/', (req, res) => {
       health: '/health',
       auth: '/api/auth',
       email: '/api/email',
-      drafts: '/api/drafts',
-      stats: '/api/stats',
       whatsapp: '/api/whatsapp'
     }
   });
@@ -80,7 +74,7 @@ app.use((req, res) => {
   res.status(404).json({
     error: 'Not Found',
     message: `Cannot ${req.method} ${req.path}`,
-    availableEndpoints: ['/health', '/api/auth', '/api/email', '/api/drafts', '/api/stats', '/api/whatsapp']
+    availableEndpoints: ['/health', '/api/auth', '/api/email', '/api/whatsapp']
   });
 });
 
@@ -104,7 +98,6 @@ const startServer = async () => {
     console.log('✅ Database connected');
 
     // Sync database - ALTER mode (safe for production)
-    // Tables already created with UUID ids from previous force sync
     await sequelize.sync({ alter: true, force: false });
     console.log('✅ Database synced');
 
@@ -153,35 +146,3 @@ process.on('SIGINT', async () => {
 });
 
 module.exports = app;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
