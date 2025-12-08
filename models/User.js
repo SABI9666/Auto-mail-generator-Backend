@@ -35,8 +35,18 @@ module.exports = (sequelize) => {
     whatsappNumber: {
       type: DataTypes.STRING,
       allowNull: true,
+      set(value) {
+        if (value) {
+          this.setDataValue('whatsappNumber', value.trim());
+        } else {
+          this.setDataValue('whatsappNumber', value);
+        }
+      },
       validate: {
-        is: /^\+?[1-9]\d{1,14}$/
+        is: {
+          args: /^\+?[1-9]\d{1,14}$/,
+          msg: 'Invalid phone number format. Use E.164 format (e.g., +919895909666)'
+        }
       }
     },
     emailPreferences: {
@@ -100,3 +110,23 @@ module.exports = (sequelize) => {
 
   return User;
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
