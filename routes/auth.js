@@ -40,7 +40,20 @@ router.get('/profile', authMiddleware, async (req, res) => {
   try {
     const user = await User.findByPk(req.user.id);
     if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json(user);
+    
+    // Add gmailConnected boolean and exclude sensitive token data
+    const userProfile = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      whatsappNumber: user.whatsappNumber,
+      emailPreferences: user.emailPreferences,
+      gmailConnected: !!(user.gmailAccessToken && user.gmailRefreshToken),
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt
+    };
+    
+    res.json(userProfile);
   } catch (error) {
     console.error('Profile fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch profile' });
@@ -78,6 +91,22 @@ router.put('/profile', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error('Profile update error:', error);
     res.status(500).json({ error: 'Failed to update profile', message: error.message });
+  }
+});
+
+router.get('/gmail/status', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findByPk(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    
+    const isConnected = !!(user.gmailAccessToken && user.gmailRefreshToken);
+    res.json({ 
+      connected: isConnected,
+      email: isConnected ? user.email : null
+    });
+  } catch (error) {
+    console.error('Gmail status check error:', error);
+    res.status(500).json({ error: 'Failed to check Gmail status' });
   }
 });
 
@@ -143,6 +172,10 @@ router.delete('/gmail/disconnect', authMiddleware, async (req, res) => {
 });
 
 module.exports = router;
+
+
+
+
 
 
 
