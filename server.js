@@ -34,8 +34,8 @@ app.use(express.urlencoded({ extended: true }));
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
@@ -87,7 +87,6 @@ app.use((req, res) => {
 // Global error handler
 app.use((err, req, res, next) => {
   console.error('Error:', err);
-  
   res.status(err.status || 500).json({
     error: err.message || 'Internal Server Error',
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
@@ -104,9 +103,9 @@ const startServer = async () => {
     await sequelize.authenticate();
     console.log('✅ Database connected');
 
-    // Sync database (create tables if they don't exist)
-    await sequelize.sync({ alter: false });
-    console.log('✅ Database synced');
+    // Sync database - ALTER mode to update existing tables without dropping data
+    await sequelize.sync({ alter: true, force: false });
+    console.log('✅ Database synced with schema updates');
 
     // Start server
     app.listen(PORT, '0.0.0.0', () => {
@@ -126,7 +125,6 @@ startServer();
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (err) => {
   console.error('Unhandled Promise Rejection:', err);
-  // Don't exit in production
   if (process.env.NODE_ENV !== 'production') {
     process.exit(1);
   }
@@ -135,7 +133,6 @@ process.on('unhandledRejection', (err) => {
 // Handle uncaught exceptions
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err);
-  // Don't exit in production
   if (process.env.NODE_ENV !== 'production') {
     process.exit(1);
   }
