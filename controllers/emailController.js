@@ -59,8 +59,9 @@ const scanInbox = async (req, res) => {
         const msg = messagesToProcess[i];
         
         // Check if draft already exists for this email
+        // FIXED: Changed emailId to originalEmailId
         const existingDraft = await Draft.findOne({ 
-          where: { emailId: msg.id, userId } 
+          where: { originalEmailId: msg.id, userId } 
         });
         
         if (existingDraft) {
@@ -79,21 +80,20 @@ const scanInbox = async (req, res) => {
         );
         console.log('✅ AI reply generated successfully');
 
-        // Generate approval token
-        const approvalToken = crypto.randomBytes(16).toString('hex');
-
-        // Create draft
+        // Create draft with threading info
+        // FIXED: Changed emailId to originalEmailId, added messageId and references
         const draft = await Draft.create({
           userId: userId,
-          emailId: messageData.id,
+          originalEmailId: messageData.id,        // FIXED: was emailId
           threadId: messageData.threadId,
-          from: messageData.to, // User's email
-          to: messageData.from, // Sender's email
+          messageId: messageData.messageId,       // NEW: For In-Reply-To header
+          references: messageData.references,     // NEW: For References header
+          from: messageData.to,                   // User's email
+          to: messageData.from,                   // Sender's email
           subject: `Re: ${messageData.subject}`,
           originalBody: messageData.body,
           generatedReply: aiReply,
-          status: 'pending',
-          approvalToken: approvalToken
+          status: 'pending'
         });
 
         draftsCreated++;
@@ -111,7 +111,8 @@ const scanInbox = async (req, res) => {
                 subject: messageData.subject,
                 originalBody: messageData.body,
                 generatedReply: aiReply,
-                to: messageData.to
+                to: messageData.to,
+                date: messageData.date
               },
               draft.id
             );
@@ -232,7 +233,7 @@ const getDraft = async (req, res) => {
   }
 };
 
-// APPROVE DRAFT
+// APPROVE DRAFT - FIXED: Now sends as threaded reply
 const approveDraft = async (req, res) => {
   try {
     const { draftId } = req.params;
@@ -246,20 +247,27 @@ const approveDraft = async (req, res) => {
       return res.status(404).json({ error: 'Draft not found' });
     }
 
-    // Send the email
-    await gmailService.sendReply(userId, {
+    // Send the email with proper threading
+    // FIXED: Added inReplyTo and references for proper reply threading
+    const sentEmail = await gmailService.sendReply(userId, {
       to: draft.to,
       subject: draft.subject,
       body: draft.generatedReply,
-      threadId: draft.threadId
+      threadId: draft.threadId,
+      inReplyTo: draft.messageId,      // NEW: For In-Reply-To header
+      references: draft.references     // NEW: For References header
     });
 
     // Mark original email as read
-    await gmailService.markAsRead(userId, draft.emailId);
+    // FIXED: Changed emailId to originalEmailId
+    if (draft.originalEmailId) {
+      await gmailService.markAsRead(userId, draft.originalEmailId);
+    }
 
     // Update draft status
     draft.status = 'sent';
     draft.sentAt = new Date();
+    draft.sentEmailId = sentEmail.id;  // Store sent email ID
     await draft.save();
 
     // ═══════════════════════════════════════════════════════════════════
@@ -282,6 +290,7 @@ const approveDraft = async (req, res) => {
     }
     // ═══════════════════════════════════════════════════════════════════
 
+    console.log('✅ Reply sent as threaded message');
     res.json({ message: 'Draft approved and email sent', draft });
   } catch (error) {
     console.error('Approve draft error:', error);
@@ -304,6 +313,7 @@ const rejectDraft = async (req, res) => {
     }
 
     draft.status = 'rejected';
+    draft.rejectedAt = new Date();
     await draft.save();
 
     // ═══════════════════════════════════════════════════════════════════
@@ -332,7 +342,7 @@ const rejectDraft = async (req, res) => {
   }
 };
 
-// EDIT AND SEND DRAFT
+// EDIT AND SEND DRAFT - FIXED: Now sends as threaded reply
 const editDraft = async (req, res) => {
   try {
     const { draftId } = req.params;
@@ -347,24 +357,31 @@ const editDraft = async (req, res) => {
       return res.status(404).json({ error: 'Draft not found' });
     }
 
-    // Update draft with edited content
-    draft.generatedReply = editedBody;
+    // Store edited content
+    draft.editedReply = editedBody;
     await draft.save();
 
-    // Send the edited email
-    await gmailService.sendReply(userId, {
+    // Send the edited email with proper threading
+    // FIXED: Added inReplyTo and references for proper reply threading
+    const sentEmail = await gmailService.sendReply(userId, {
       to: draft.to,
       subject: draft.subject,
       body: editedBody,
-      threadId: draft.threadId
+      threadId: draft.threadId,
+      inReplyTo: draft.messageId,      // NEW: For In-Reply-To header
+      references: draft.references     // NEW: For References header
     });
 
     // Mark original as read
-    await gmailService.markAsRead(userId, draft.emailId);
+    // FIXED: Changed emailId to originalEmailId
+    if (draft.originalEmailId) {
+      await gmailService.markAsRead(userId, draft.originalEmailId);
+    }
 
     // Update status
-    draft.status = 'sent';
+    draft.status = 'edited';
     draft.sentAt = new Date();
+    draft.sentEmailId = sentEmail.id;
     await draft.save();
 
     // ═══════════════════════════════════════════════════════════════════
@@ -387,6 +404,7 @@ const editDraft = async (req, res) => {
     }
     // ═══════════════════════════════════════════════════════════════════
 
+    console.log('✅ Edited reply sent as threaded message');
     res.json({ message: 'Draft edited and sent', draft });
   } catch (error) {
     console.error('Edit draft error:', error);
@@ -403,3 +421,17 @@ module.exports = {
   rejectDraft,
   editDraft
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
