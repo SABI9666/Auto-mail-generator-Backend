@@ -15,37 +15,36 @@ class TwilioService {
     }
   }
 
-  // Format date like email clients (Gmail/Outlook style)
+  // Format date with Indian timezone (IST)
   formatEmailDate(dateString) {
-    const date = dateString ? new Date(dateString) : new Date();
-    const options = {
-      weekday: 'short',
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true
-    };
-    return date.toLocaleString('en-US', options);
+    if (!dateString) {
+      return new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+    }
+    
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+    } catch (e) {
+      return dateString;
+    }
   }
 
   // Extract name from email address
   extractSenderName(from) {
-    if (!from) return 'Unknown Sender';
-    
-    // Match "Name <email>" or just "email"
+    if (!from) return 'Unknown';
     const nameMatch = from.match(/^([^<]+)</);
-    if (nameMatch) {
-      return nameMatch[1].trim().replace(/"/g, '');
-    }
-    
-    // If just email, extract name part
+    if (nameMatch) return nameMatch[1].trim().replace(/"/g, '');
     const emailMatch = from.match(/([^@]+)@/);
-    if (emailMatch) {
-      return emailMatch[1].charAt(0).toUpperCase() + emailMatch[1].slice(1);
-    }
-    
+    if (emailMatch) return emailMatch[1].charAt(0).toUpperCase() + emailMatch[1].slice(1);
     return from;
   }
 
@@ -56,99 +55,57 @@ class TwilioService {
     return emailMatch ? emailMatch[1] : from;
   }
 
-  // Professional Email-Client Style Format (Gmail/Outlook inspired)
+  // Truncate text
+  truncateText(text, maxLength) {
+    if (!text) return 'No content';
+    const cleanText = text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    if (cleanText.length <= maxLength) return cleanText;
+    return cleanText.substring(0, maxLength).trim() + '...';
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PROFESSIONAL WHATSAPP FORMAT
+  // Header (From, Subject, Time) visible in preview
+  // Details hidden under "Read more"
+  // ═══════════════════════════════════════════════════════════════════════════
   formatDraftNotification(draft, draftId) {
     const senderName = this.extractSenderName(draft.from);
     const senderEmail = this.extractEmail(draft.from);
     const formattedDate = this.formatEmailDate(draft.date);
     const subjectLine = draft.subject || '(No Subject)';
-    
-    // Create email preview (first 150 chars of original)
-    const preview = this.truncateText(draft.originalBody, 150);
-    
-    // Create shorter reply preview
-    const replyPreview = this.truncateText(draft.generatedReply, 250);
+    const shortId = draftId.slice(0, 8);
 
-    const message = `
-┌─────────────────────────────┐
-│  📬  *NEW EMAIL RECEIVED*   │
-└─────────────────────────────┘
+    // Compact header - this shows in WhatsApp preview
+    const message = `📬 *NEW EMAIL*
 
-┌ *FROM*
-│ 👤 ${senderName}
-│ ✉️ ${senderEmail}
-└────────────────────────
+👤 *${senderName}*
+📋 ${subjectLine}
+🕐 ${formattedDate}
 
-┌ *SUBJECT*
-│ 📋 ${subjectLine}
-└────────────────────────
+━━━━━━━━━━━━━━━━━━━━
 
-┌ *RECEIVED*
-│ 🕐 ${formattedDate}
-└────────────────────────
+📩 *Original Message:*
+${this.truncateText(draft.originalBody, 180)}
 
-╔═══════════════════════════╗
-║     📩 ORIGINAL EMAIL     ║
-╚═══════════════════════════╝
+✍️ *AI Draft Reply:*
+${this.truncateText(draft.generatedReply, 220)}
 
-${preview}
+━━━━━━━━━━━━━━━━━━━━
 
-╔═══════════════════════════╗
-║    ✍️ AI DRAFT REPLY      ║
-╚═══════════════════════════╝
+*Quick Actions:*
+✅ \`approve ${shortId}\`
+✏️ \`edit ${shortId} [your text]\`
+❌ \`reject ${shortId}\`
 
-${replyPreview}
-
-┌─────────────────────────────┐
-│      ⚡ QUICK ACTIONS       │
-├─────────────────────────────┤
-│                             │
-│ ✅ *APPROVE & SEND*         │
-│ ▶ approve ${draftId.slice(0, 8)}       │
-│                             │
-│ ✏️ *EDIT & SEND*            │
-│ ▶ edit ${draftId.slice(0, 8)} [text]   │
-│                             │
-│ ❌ *REJECT*                 │
-│ ▶ reject ${draftId.slice(0, 8)}        │
-│                             │
-└─────────────────────────────┘
-
-🔗 *Full Draft ID:* \`${draftId}\`
-🌐 View online: ${process.env.FRONTEND_URL || 'N/A'}/drafts
-    `.trim();
+_ID: ${draftId}_`;
 
     return message;
   }
 
-  // Compact notification format (alternative)
-  formatCompactNotification(draft, draftId) {
-    const senderName = this.extractSenderName(draft.from);
-    const subjectLine = draft.subject || '(No Subject)';
-    const shortId = draftId.slice(0, 8);
-
-    return `
-📬 *New Email Draft*
-
-*From:* ${senderName}
-*Subject:* ${subjectLine}
-
-*Preview:*
-${this.truncateText(draft.originalBody, 100)}
-
-*AI Reply:*
-${this.truncateText(draft.generatedReply, 150)}
-
-─────────────
-✅ approve ${shortId}
-✏️ edit ${shortId} [changes]
-❌ reject ${shortId}
-    `.trim();
-  }
-
-  // Format confirmation message - Professional style
+  // Format confirmation message
   formatConfirmation(action, draft) {
-    const timestamp = new Date().toLocaleString('en-US', {
+    const timestamp = new Date().toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
       hour: '2-digit',
       minute: '2-digit',
       hour12: true,
@@ -157,66 +114,28 @@ ${this.truncateText(draft.generatedReply, 150)}
     });
 
     const confirmations = {
-      sent: `
-┌─────────────────────────────┐
-│   ✅ *EMAIL SENT*           │
-└─────────────────────────────┘
+      sent: `✅ *EMAIL SENT*
 
-📤 *To:* ${draft.to}
-📋 *Subject:* ${draft.subject}
-🕐 *Time:* ${timestamp}
-
-✨ Your reply has been sent successfully!
-      `,
+📤 ${draft.to}
+📋 ${draft.subject}
+🕐 ${timestamp}`,
       
-      rejected: `
-┌─────────────────────────────┐
-│   ❌ *DRAFT REJECTED*       │
-└─────────────────────────────┘
+      rejected: `❌ *DRAFT REJECTED*
 
-📋 *Subject:* ${draft.subject}
-🕐 *Time:* ${timestamp}
-
-🗑️ Draft has been discarded.
-      `,
+📋 ${draft.subject}
+🕐 ${timestamp}`,
       
-      edited: `
-┌─────────────────────────────┐
-│   ✏️ *EDITED EMAIL SENT*    │
-└─────────────────────────────┘
+      edited: `✏️ *EDITED & SENT*
 
-📤 *To:* ${draft.to}
-📋 *Subject:* ${draft.subject}
-🕐 *Time:* ${timestamp}
+📤 ${draft.to}
+📋 ${draft.subject}
+🕐 ${timestamp}`,
 
-✨ Your edited reply has been sent!
-      `,
-
-      error: `
-┌─────────────────────────────┐
-│   ⚠️ *ACTION FAILED*        │
-└─────────────────────────────┘
-
-❗ Could not process your request.
-Please try again or check the web dashboard.
-      `
+      error: `⚠️ *ACTION FAILED*
+Please try again.`
     };
 
     return (confirmations[action] || confirmations.error).trim();
-  }
-
-  // Truncate text with ellipsis
-  truncateText(text, maxLength) {
-    if (!text) return '_No content_';
-    
-    // Clean up the text
-    const cleanText = text
-      .replace(/\r\n/g, '\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-    
-    if (cleanText.length <= maxLength) return cleanText;
-    return cleanText.substring(0, maxLength).trim() + '...';
   }
 
   // Send draft notification
@@ -245,30 +164,6 @@ Please try again or check the web dashboard.
       return { success: true, messageId: response.sid };
     } catch (error) {
       console.error('❌ WhatsApp draft notification error:', error.message);
-      return { success: false, error: error.message };
-    }
-  }
-
-  // Send compact notification (for less intrusive alerts)
-  async sendCompactNotification(to, draft, draftId) {
-    if (!this.isConfigured || !to) {
-      return { success: false, message: 'Not configured or no recipient' };
-    }
-
-    try {
-      const recipientNumber = to.startsWith('whatsapp:') ? to : `whatsapp:${to}`;
-      const message = this.formatCompactNotification(draft, draftId);
-
-      const response = await this.client.messages.create({
-        from: this.whatsappNumber,
-        to: recipientNumber,
-        body: message
-      });
-
-      console.log('✅ Compact notification sent:', response.sid);
-      return { success: true, messageId: response.sid };
-    } catch (error) {
-      console.error('❌ Compact notification error:', error.message);
       return { success: false, error: error.message };
     }
   }
@@ -359,17 +254,3 @@ Please try again or check the web dashboard.
 }
 
 module.exports = new TwilioService();
-
-
-
-
-
-
-
-
-
-
-
-
-
-
