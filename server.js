@@ -6,182 +6,96 @@ const sequelize = require('./config/database');
 
 // Import routes
 const authRoutes = require('./routes/auth');
-const emailRoutes = require('./routes/email');
+const emailRoutes = require('./routes/email'); // This handles drafts
+const gmailRoutes = require('./routes/gmail'); // <--- NEW: You were missing this!
 const whatsappRoutes = require('./routes/whatsapp');
 const statsRoutes = require('./routes/stats');
 
-// Initialize Express app
 const app = express();
 
-// CRITICAL: Trust proxy for Render deployment (fixes rate limiter warning)
+// Trust proxy for Render
 app.set('trust proxy', 1);
 
-// CORS configuration
+// SECURITY: CORS Configuration
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  process.env.FRONTEND_URL // Your production URL from .env
+].filter(Boolean);
+
 const corsOptions = {
-  origin: process.env.FRONTEND_URL || '*',
-  credentials: true,
-  optionsSuccessStatus: 200
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) === -1) {
+      // If specific origin not found, but we are in dev, allow it (optional)
+      if (process.env.NODE_ENV === 'development') return callback(null, true);
+      
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
+  credentials: true, // Required for cookies/authorization headers
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 };
+
 app.use(cors(corsOptions));
-
-// Security middleware
 app.use(helmet());
-
-// Body parsing middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Debug Middleware: Log all requests to see if they reach the server
+app.use((req, res, next) => {
+  console.log(`📢 ${req.method} ${req.path}`);
+  next();
+});
 
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
-  message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true,
   legacyHeaders: false,
 });
 app.use('/api/', limiter);
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    service: 'email-auto-responder',
-    database: sequelize.authenticate() ? 'connected' : 'disconnected'
-  });
-});
-
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/email', emailRoutes);
+app.use('/api/gmail', gmailRoutes); // <--- NEW: Mount the Gmail routes
 app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api/stats', statsRoutes);
 
-// Root endpoint
-app.get('/', (req, res) => {
-  res.json({
-    message: 'Email Auto Responder API',
-    version: '1.0.0',
-    endpoints: {
-      health: '/health',
-      auth: '/api/auth',
-      email: '/api/email',
-      whatsapp: '/api/whatsapp',
-      stats: '/api/stats'
-    }
-  });
+// Health check
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', service: 'auto-responder-backend' });
 });
 
 // 404 handler
 app.use((req, res) => {
-  res.status(404).json({
-    error: 'Not Found',
-    message: `Cannot ${req.method} ${req.path}`,
-    availableEndpoints: ['/health', '/api/auth', '/api/email', '/api/whatsapp', '/api/stats']
-  });
+  console.log(`❌ 404 Not Found: ${req.method} ${req.path}`);
+  res.status(404).json({ error: 'Endpoint not found' });
 });
 
-// Global error handler
-app.use((err, req, res, next) => {
-  console.error('Error:', err);
-  res.status(err.status || 500).json({
-    error: err.message || 'Internal Server Error',
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
-  });
-});
-
-// Port configuration
 const PORT = process.env.PORT || 10000;
 
-// Database sync and server start
 const startServer = async () => {
   try {
-    // Test database connection
     await sequelize.authenticate();
     console.log('✅ Database connected');
-
-    // Sync database - ALTER mode (safe for production)
-    await sequelize.sync({ alter: true, force: false });
-    console.log('✅ Database synced');
-
-    // Start server
+    await sequelize.sync({ alter: true });
+    
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Server running on port ${PORT}`);
-      console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`Frontend URL: ${process.env.FRONTEND_URL || 'Not set'}`);
+      console.log(`📡 Allowed Origins:`, allowedOrigins);
     });
   } catch (error) {
-    console.error('❌ Failed to start server:', error);
-    process.exit(1);
+    console.error('❌ Server startup failed:', error);
   }
 };
 
-// Start the server
 startServer();
 
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (err) => {
-  console.error('Unhandled Promise Rejection:', err);
-  if (process.env.NODE_ENV !== 'production') {
-    process.exit(1);
-  }
-});
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
-  if (process.env.NODE_ENV !== 'production') {
-    process.exit(1);
-  }
-});
-
-// Graceful shutdown
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM signal received: closing HTTP server');
-  await sequelize.close();
-  process.exit(0);
-});
-
-process.on('SIGINT', async () => {
-  console.log('SIGINT signal received: closing HTTP server');
-  await sequelize.close();
-  process.exit(0);
-});
-
 module.exports = app;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
