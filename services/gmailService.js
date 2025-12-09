@@ -50,15 +50,12 @@ class GmailService {
     return google.gmail({ version: 'v1', auth: oauth2Client });
   }
 
-  // UPDATED: Filter to get ONLY inbox emails (no promotions, no spam, no social, etc.)
+  // Filter to get ONLY inbox emails (no promotions, no spam, no social, etc.)
   async listMessages(userId, maxResults = 10, timeFilter = null) {
     const gmail = await this.setCredentials(userId);
     
-    // Build query to get ONLY inbox emails
-    // Excludes: SPAM, PROMOTIONS, SOCIAL, UPDATES, FORUMS
     let query = 'in:inbox -in:spam -in:promotions -in:social -in:updates -in:forums';
     
-    // Add time filter if provided
     if (timeFilter) {
       const timestamp = Math.floor(timeFilter.getTime() / 1000);
       query += ` after:${timestamp}`;
@@ -79,7 +76,6 @@ class GmailService {
   async listUnreadMessages(userId, timeFilter = null) {
     const gmail = await this.setCredentials(userId);
     
-    // Get ONLY unread inbox emails (no promotions/spam)
     let query = 'is:unread in:inbox -in:spam -in:promotions -in:social -in:updates -in:forums';
     
     if (timeFilter) {
@@ -92,7 +88,7 @@ class GmailService {
     const response = await gmail.users.messages.list({
       userId: 'me',
       q: query,
-      maxResults: 50 // Limit to prevent rate limit issues
+      maxResults: 50
     });
 
     return response.data.messages || [];
@@ -116,13 +112,22 @@ class GmailService {
     const to = getHeader('To');
     const subject = getHeader('Subject');
     const date = getHeader('Date');
+    const messageIdHeader = getHeader('Message-ID') || getHeader('Message-Id');
+    const references = getHeader('References');
 
     // Extract body
     let body = '';
+    let htmlBody = '';
+    
     if (message.payload.parts) {
       const textPart = message.payload.parts.find(part => part.mimeType === 'text/plain');
+      const htmlPart = message.payload.parts.find(part => part.mimeType === 'text/html');
+      
       if (textPart && textPart.body.data) {
         body = Buffer.from(textPart.body.data, 'base64').toString('utf-8');
+      }
+      if (htmlPart && htmlPart.body.data) {
+        htmlBody = Buffer.from(htmlPart.body.data, 'base64').toString('utf-8');
       }
     } else if (message.payload.body.data) {
       body = Buffer.from(message.payload.body.data, 'base64').toString('utf-8');
@@ -131,45 +136,95 @@ class GmailService {
     return {
       id: message.id,
       threadId: message.threadId,
+      messageId: messageIdHeader,  // Original Message-ID header for replies
+      references: references,       // References header for threading
       from,
       to,
       subject,
       body,
+      htmlBody,
       date,
-      snippet: message.snippet
+      snippet: message.snippet,
+      labelIds: message.labelIds || []
     };
   }
 
+  // FIXED: Send email with proper reply threading
   async sendEmail(userId, emailData) {
     const gmail = await this.setCredentials(userId);
     
-    const { to, subject, body, threadId } = emailData;
+    const { to, subject, body, threadId, inReplyTo, references } = emailData;
     
-    const email = [
+    // Build email headers
+    const emailHeaders = [
       `To: ${to}`,
       `Subject: ${subject}`,
-      'Content-Type: text/plain; charset=utf-8',
+      'MIME-Version: 1.0',
+      'Content-Type: text/plain; charset=utf-8'
+    ];
+
+    // Add reply headers for proper threading (CRITICAL FOR REPLIES)
+    if (inReplyTo) {
+      emailHeaders.push(`In-Reply-To: ${inReplyTo}`);
+    }
+    
+    if (references) {
+      // Append original message ID to references chain
+      const refChain = inReplyTo ? `${references} ${inReplyTo}` : references;
+      emailHeaders.push(`References: ${refChain}`);
+    } else if (inReplyTo) {
+      // If no references but we have inReplyTo, use that
+      emailHeaders.push(`References: ${inReplyTo}`);
+    }
+
+    const email = [
+      ...emailHeaders,
       '',
       body
-    ].join('\n');
+    ].join('\r\n');
 
-    const encodedEmail = Buffer.from(email).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const encodedEmail = Buffer.from(email)
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
 
     const requestBody = { raw: encodedEmail };
+    
+    // Add threadId for Gmail threading
     if (threadId) {
       requestBody.threadId = threadId;
     }
+
+    console.log('📧 Sending email with threading:', {
+      to,
+      subject,
+      threadId,
+      inReplyTo,
+      hasReferences: !!references
+    });
 
     const response = await gmail.users.messages.send({
       userId: 'me',
       requestBody: requestBody
     });
 
+    console.log('✅ Email sent successfully:', response.data.id);
     return response.data;
   }
 
+  // Send reply with proper threading
   async sendReply(userId, emailData) {
-    return await this.sendEmail(userId, emailData);
+    // Ensure subject has "Re:" prefix
+    let subject = emailData.subject || '';
+    if (!subject.toLowerCase().startsWith('re:')) {
+      subject = `Re: ${subject}`;
+    }
+
+    return await this.sendEmail(userId, {
+      ...emailData,
+      subject: subject
+    });
   }
 
   async markAsRead(userId, messageId) {
@@ -182,41 +237,18 @@ class GmailService {
       }
     });
   }
+
+  // Get user's email address
+  async getUserEmail(userId) {
+    const gmail = await this.setCredentials(userId);
+    const response = await gmail.users.getProfile({
+      userId: 'me'
+    });
+    return response.data.emailAddress;
+  }
 }
 
 module.exports = new GmailService();
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
