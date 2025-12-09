@@ -1,0 +1,53 @@
+// migrations/XXXXXX-add-threading-columns-to-drafts.js
+// Run: npx sequelize-cli db:migrate
+
+'use strict';
+
+module.exports = {
+  async up(queryInterface, Sequelize) {
+    // Add messageId column for In-Reply-To header
+    await queryInterface.addColumn('Drafts', 'messageId', {
+      type: Sequelize.STRING,
+      allowNull: true,
+      comment: 'Original Message-ID header for reply threading'
+    });
+
+    // Add references column for References header chain
+    await queryInterface.addColumn('Drafts', 'references', {
+      type: Sequelize.TEXT,
+      allowNull: true,
+      comment: 'References header chain for email threading'
+    });
+
+    // Add editedReply column if not exists
+    await queryInterface.addColumn('Drafts', 'editedReply', {
+      type: Sequelize.TEXT,
+      allowNull: true,
+      comment: 'User edited version of AI reply'
+    }).catch(() => {
+      console.log('editedReply column may already exist');
+    });
+
+    // Add sentEmailId to track the sent message
+    await queryInterface.addColumn('Drafts', 'sentEmailId', {
+      type: Sequelize.STRING,
+      allowNull: true,
+      comment: 'Gmail ID of the sent reply message'
+    }).catch(() => {
+      console.log('sentEmailId column may already exist');
+    });
+
+    console.log('✅ Threading columns added to Drafts table');
+  },
+
+  async down(queryInterface, Sequelize) {
+    await queryInterface.removeColumn('Drafts', 'messageId');
+    await queryInterface.removeColumn('Drafts', 'references');
+    await queryInterface.removeColumn('Drafts', 'editedReply');
+    await queryInterface.removeColumn('Drafts', 'sentEmailId');
+  }
+};
+
+
+
+
