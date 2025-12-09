@@ -6,7 +6,6 @@ class TwilioService {
     this.authToken = process.env.TWILIO_AUTH_TOKEN;
     this.whatsappNumber = process.env.TWILIO_WHATSAPP_NUMBER;
     
-    // Only initialize client if credentials exist
     if (this.accountSid && this.authToken) {
       this.client = twilio(this.accountSid, this.authToken);
       this.isConfigured = true;
@@ -16,105 +15,208 @@ class TwilioService {
     }
   }
 
-  // Format professional draft notification
+  // Format date like email clients (Gmail/Outlook style)
+  formatEmailDate(dateString) {
+    const date = dateString ? new Date(dateString) : new Date();
+    const options = {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    };
+    return date.toLocaleString('en-US', options);
+  }
+
+  // Extract name from email address
+  extractSenderName(from) {
+    if (!from) return 'Unknown Sender';
+    
+    // Match "Name <email>" or just "email"
+    const nameMatch = from.match(/^([^<]+)</);
+    if (nameMatch) {
+      return nameMatch[1].trim().replace(/"/g, '');
+    }
+    
+    // If just email, extract name part
+    const emailMatch = from.match(/([^@]+)@/);
+    if (emailMatch) {
+      return emailMatch[1].charAt(0).toUpperCase() + emailMatch[1].slice(1);
+    }
+    
+    return from;
+  }
+
+  // Extract email from "Name <email>" format
+  extractEmail(from) {
+    if (!from) return '';
+    const emailMatch = from.match(/<([^>]+)>/);
+    return emailMatch ? emailMatch[1] : from;
+  }
+
+  // Professional Email-Client Style Format (Gmail/Outlook inspired)
   formatDraftNotification(draft, draftId) {
+    const senderName = this.extractSenderName(draft.from);
+    const senderEmail = this.extractEmail(draft.from);
+    const formattedDate = this.formatEmailDate(draft.date);
+    const subjectLine = draft.subject || '(No Subject)';
+    
+    // Create email preview (first 150 chars of original)
+    const preview = this.truncateText(draft.originalBody, 150);
+    
+    // Create shorter reply preview
+    const replyPreview = this.truncateText(draft.generatedReply, 250);
+
     const message = `
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-📧 *NEW EMAIL DRAFT CREATED*
-━━━━━━━━━━━━━━━━━━━━━━━━━━
+┌─────────────────────────────┐
+│  📬  *NEW EMAIL RECEIVED*   │
+└─────────────────────────────┘
 
-*FROM:* ${draft.from || 'Unknown'}
+┌ *FROM*
+│ 👤 ${senderName}
+│ ✉️ ${senderEmail}
+└────────────────────────
 
-*SUBJECT:* ${draft.subject || 'No Subject'}
+┌ *SUBJECT*
+│ 📋 ${subjectLine}
+└────────────────────────
 
-*DATE:* ${new Date().toLocaleString()}
+┌ *RECEIVED*
+│ 🕐 ${formattedDate}
+└────────────────────────
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-📩 *ORIGINAL MESSAGE*
-━━━━━━━━━━━━━━━━━━━━━━━━━━
+╔═══════════════════════════╗
+║     📩 ORIGINAL EMAIL     ║
+╚═══════════════════════════╝
 
-${this.truncateText(draft.originalBody, 200)}
+${preview}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-✍️ *AI GENERATED REPLY*
-━━━━━━━━━━━━━━━━━━━━━━━━━━
+╔═══════════════════════════╗
+║    ✍️ AI DRAFT REPLY      ║
+╚═══════════════════════════╝
 
-${this.truncateText(draft.generatedReply, 300)}
+${replyPreview}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-⚡ *QUICK ACTIONS*
-━━━━━━━━━━━━━━━━━━━━━━━━━━
+┌─────────────────────────────┐
+│      ⚡ QUICK ACTIONS       │
+├─────────────────────────────┤
+│                             │
+│ ✅ *APPROVE & SEND*         │
+│ ▶ approve ${draftId.slice(0, 8)}       │
+│                             │
+│ ✏️ *EDIT & SEND*            │
+│ ▶ edit ${draftId.slice(0, 8)} [text]   │
+│                             │
+│ ❌ *REJECT*                 │
+│ ▶ reject ${draftId.slice(0, 8)}        │
+│                             │
+└─────────────────────────────┘
 
-Reply with one of these commands:
-
-✅ *APPROVE* - Send the email as-is
-▶️ approve ${draftId}
-
-✏️ *EDIT* - Modify and send
-▶️ edit ${draftId} [your edited text]
-
-❌ *REJECT* - Discard draft
-▶️ reject ${draftId}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-🔗 *VIEW ONLINE*
-${process.env.FRONTEND_URL}/drafts
-
-*Draft ID:* ${draftId}
-━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔗 *Full Draft ID:* \`${draftId}\`
+🌐 View online: ${process.env.FRONTEND_URL || 'N/A'}/drafts
     `.trim();
 
     return message;
   }
 
-  // Format confirmation message
+  // Compact notification format (alternative)
+  formatCompactNotification(draft, draftId) {
+    const senderName = this.extractSenderName(draft.from);
+    const subjectLine = draft.subject || '(No Subject)';
+    const shortId = draftId.slice(0, 8);
+
+    return `
+📬 *New Email Draft*
+
+*From:* ${senderName}
+*Subject:* ${subjectLine}
+
+*Preview:*
+${this.truncateText(draft.originalBody, 100)}
+
+*AI Reply:*
+${this.truncateText(draft.generatedReply, 150)}
+
+─────────────
+✅ approve ${shortId}
+✏️ edit ${shortId} [changes]
+❌ reject ${shortId}
+    `.trim();
+  }
+
+  // Format confirmation message - Professional style
   formatConfirmation(action, draft) {
+    const timestamp = new Date().toLocaleString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+      day: 'numeric',
+      month: 'short'
+    });
+
     const confirmations = {
       sent: `
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-✅ *EMAIL SENT SUCCESSFULLY*
-━━━━━━━━━━━━━━━━━━━━━━━━━━
+┌─────────────────────────────┐
+│   ✅ *EMAIL SENT*           │
+└─────────────────────────────┘
 
-*TO:* ${draft.to}
-*SUBJECT:* ${draft.subject}
-*TIME:* ${new Date().toLocaleTimeString()}
+📤 *To:* ${draft.to}
+📋 *Subject:* ${draft.subject}
+🕐 *Time:* ${timestamp}
 
-Your email has been sent! ✉️
-━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ Your reply has been sent successfully!
       `,
+      
       rejected: `
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-❌ *DRAFT REJECTED*
-━━━━━━━━━━━━━━━━━━━━━━━━━━
+┌─────────────────────────────┐
+│   ❌ *DRAFT REJECTED*       │
+└─────────────────────────────┘
 
-*SUBJECT:* ${draft.subject}
-*TIME:* ${new Date().toLocaleTimeString()}
+📋 *Subject:* ${draft.subject}
+🕐 *Time:* ${timestamp}
 
-Draft discarded successfully.
-━━━━━━━━━━━━━━━━━━━━━━━━━━
+🗑️ Draft has been discarded.
       `,
+      
       edited: `
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-✏️ *EDITED EMAIL SENT*
-━━━━━━━━━━━━━━━━━━━━━━━━━━
+┌─────────────────────────────┐
+│   ✏️ *EDITED EMAIL SENT*    │
+└─────────────────────────────┘
 
-*TO:* ${draft.to}
-*SUBJECT:* ${draft.subject}
-*TIME:* ${new Date().toLocaleTimeString()}
+📤 *To:* ${draft.to}
+📋 *Subject:* ${draft.subject}
+🕐 *Time:* ${timestamp}
 
-Your edited email has been sent! ✉️
-━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ Your edited reply has been sent!
+      `,
+
+      error: `
+┌─────────────────────────────┐
+│   ⚠️ *ACTION FAILED*        │
+└─────────────────────────────┘
+
+❗ Could not process your request.
+Please try again or check the web dashboard.
       `
     };
 
-    return confirmations[action] || 'Action completed.';
+    return (confirmations[action] || confirmations.error).trim();
   }
 
   // Truncate text with ellipsis
   truncateText(text, maxLength) {
-    if (!text) return 'No content';
-    if (text.length <= maxLength) return text;
-    return text.substring(0, maxLength) + '...';
+    if (!text) return '_No content_';
+    
+    // Clean up the text
+    const cleanText = text
+      .replace(/\r\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    
+    if (cleanText.length <= maxLength) return cleanText;
+    return cleanText.substring(0, maxLength).trim() + '...';
   }
 
   // Send draft notification
@@ -147,6 +249,30 @@ Your edited email has been sent! ✉️
     }
   }
 
+  // Send compact notification (for less intrusive alerts)
+  async sendCompactNotification(to, draft, draftId) {
+    if (!this.isConfigured || !to) {
+      return { success: false, message: 'Not configured or no recipient' };
+    }
+
+    try {
+      const recipientNumber = to.startsWith('whatsapp:') ? to : `whatsapp:${to}`;
+      const message = this.formatCompactNotification(draft, draftId);
+
+      const response = await this.client.messages.create({
+        from: this.whatsappNumber,
+        to: recipientNumber,
+        body: message
+      });
+
+      console.log('✅ Compact notification sent:', response.sid);
+      return { success: true, messageId: response.sid };
+    } catch (error) {
+      console.error('❌ Compact notification error:', error.message);
+      return { success: false, error: error.message };
+    }
+  }
+
   // Send confirmation message
   async sendConfirmation(to, action, draft) {
     if (!this.isConfigured) {
@@ -175,7 +301,7 @@ Your edited email has been sent! ✉️
     }
   }
 
-  // Generic WhatsApp message (backwards compatible)
+  // Generic WhatsApp message
   async sendWhatsAppMessage(to, body) {
     if (!this.isConfigured) {
       console.log('WhatsApp disabled - skipping notification');
@@ -204,7 +330,7 @@ Your edited email has been sent! ✉️
     }
   }
 
-  // Send SMS (backwards compatible)
+  // Send SMS
   async sendSMS(to, body) {
     if (!this.isConfigured) {
       console.log('SMS disabled - Twilio not configured');
@@ -233,102 +359,6 @@ Your edited email has been sent! ✉️
 }
 
 module.exports = new TwilioService();
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
