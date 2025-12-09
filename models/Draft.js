@@ -15,7 +15,7 @@ module.exports = (sequelize) => {
     // Original email identifiers
     originalEmailId: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: true  // Nullable for existing data compatibility
     },
     threadId: {
       type: DataTypes.STRING,
@@ -35,7 +35,7 @@ module.exports = (sequelize) => {
     // Email content
     from: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: true  // Nullable for existing data compatibility
     },
     to: {
       type: DataTypes.STRING,
@@ -88,6 +88,8 @@ module.exports = (sequelize) => {
 
   return Draft;
 };
+
+
 
 
 
