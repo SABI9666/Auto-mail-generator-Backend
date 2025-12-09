@@ -58,6 +58,7 @@ module.exports = (sequelize) => {
         signature: ''
       }
     },
+    // Gmail OAuth tokens
     gmailAccessToken: {
       type: DataTypes.TEXT,
       allowNull: true
@@ -70,6 +71,29 @@ module.exports = (sequelize) => {
       type: DataTypes.DATE,
       allowNull: true
     },
+    // ═══════════════════════════════════════════════════════════════════
+    // AUTO SCAN SETTINGS
+    // ═══════════════════════════════════════════════════════════════════
+    autoScanEnabled: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false
+    },
+    autoScanInterval: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 5,  // Default 5 minutes
+      validate: {
+        min: 1,
+        max: 60
+      }
+    },
+    lastAutoScan: {
+      type: DataTypes.DATE,
+      allowNull: true
+    },
+    // ═══════════════════════════════════════════════════════════════════
+    
     isGmailConnected: {
       type: DataTypes.VIRTUAL,
       get() {
@@ -110,3 +134,63 @@ module.exports = (sequelize) => {
 
   return User;
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
