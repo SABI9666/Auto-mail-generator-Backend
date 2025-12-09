@@ -5,6 +5,7 @@ class TwilioService {
     this.accountSid = process.env.TWILIO_ACCOUNT_SID;
     this.authToken = process.env.TWILIO_AUTH_TOKEN;
     this.whatsappNumber = process.env.TWILIO_WHATSAPP_NUMBER;
+    this.frontendUrl = process.env.FRONTEND_URL || 'https://auto-mail-generator-frontend.vercel.app';
     
     if (this.accountSid && this.authToken) {
       this.client = twilio(this.accountSid, this.authToken);
@@ -25,10 +26,8 @@ class TwilioService {
       const date = new Date(dateString);
       return date.toLocaleString('en-IN', {
         timeZone: 'Asia/Kolkata',
-        weekday: 'short',
         day: 'numeric',
         month: 'short',
-        year: 'numeric',
         hour: '2-digit',
         minute: '2-digit',
         hour12: true
@@ -48,13 +47,6 @@ class TwilioService {
     return from;
   }
 
-  // Extract email from "Name <email>" format
-  extractEmail(from) {
-    if (!from) return '';
-    const emailMatch = from.match(/<([^>]+)>/);
-    return emailMatch ? emailMatch[1] : from;
-  }
-
   // Truncate text
   truncateText(text, maxLength) {
     if (!text) return 'No content';
@@ -64,40 +56,35 @@ class TwilioService {
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PROFESSIONAL WHATSAPP FORMAT
-  // Header (From, Subject, Time) visible in preview
-  // Details hidden under "Read more"
+  // COMPACT FORMAT - Only 3 lines visible in preview, rest in "Read more"
   // ═══════════════════════════════════════════════════════════════════════════
   formatDraftNotification(draft, draftId) {
     const senderName = this.extractSenderName(draft.from);
-    const senderEmail = this.extractEmail(draft.from);
     const formattedDate = this.formatEmailDate(draft.date);
     const subjectLine = draft.subject || '(No Subject)';
-    const shortId = draftId.slice(0, 8);
 
-    // Compact header - this shows in WhatsApp preview
-    const message = `📬 *NEW EMAIL*
+    // HEADER: Only these 3 lines show in WhatsApp preview
+    // Everything after the blank line goes into "Read more"
+    const message = `📬 *${senderName}* • ${formattedDate}
+📋 *${subjectLine}*
 
-👤 *${senderName}*
-📋 ${subjectLine}
-🕐 ${formattedDate}
+━━━━━━━━━━━━━━━━━━━━━━━━
 
-━━━━━━━━━━━━━━━━━━━━
+📩 *Original:*
+${this.truncateText(draft.originalBody, 150)}
 
-📩 *Original Message:*
-${this.truncateText(draft.originalBody, 180)}
+✍️ *AI Reply:*
+${this.truncateText(draft.generatedReply, 200)}
 
-✍️ *AI Draft Reply:*
-${this.truncateText(draft.generatedReply, 220)}
+━━━━━━━━━━━━━━━━━━━━━━━━
 
-━━━━━━━━━━━━━━━━━━━━
+👉 *Take Action:*
+${this.frontendUrl}/drafts/${draftId}
 
-*Quick Actions:*
-✅ \`approve ${shortId}\`
-✏️ \`edit ${shortId} [your text]\`
-❌ \`reject ${shortId}\`
-
-_ID: ${draftId}_`;
+_Or reply with:_
+✅ approve ${draftId.slice(0, 8)}
+✏️ edit ${draftId.slice(0, 8)} [text]
+❌ reject ${draftId.slice(0, 8)}`;
 
     return message;
   }
@@ -114,24 +101,21 @@ _ID: ${draftId}_`;
     });
 
     const confirmations = {
-      sent: `✅ *EMAIL SENT*
-
+      sent: `✅ *Email Sent!*
 📤 ${draft.to}
 📋 ${draft.subject}
 🕐 ${timestamp}`,
       
-      rejected: `❌ *DRAFT REJECTED*
-
+      rejected: `❌ *Draft Rejected*
 📋 ${draft.subject}
 🕐 ${timestamp}`,
       
-      edited: `✏️ *EDITED & SENT*
-
+      edited: `✏️ *Edited & Sent!*
 📤 ${draft.to}
 📋 ${draft.subject}
 🕐 ${timestamp}`,
 
-      error: `⚠️ *ACTION FAILED*
+      error: `⚠️ *Action Failed*
 Please try again.`
     };
 
@@ -254,3 +238,19 @@ Please try again.`
 }
 
 module.exports = new TwilioService();
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
