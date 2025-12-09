@@ -1,5 +1,6 @@
+const { DataTypes } = require('sequelize');
 
-module.exports = (sequelize, DataTypes) => {
+module.exports = (sequelize) => {
   const Draft = sequelize.define('Draft', {
     id: {
       type: DataTypes.UUID,
@@ -8,35 +9,27 @@ module.exports = (sequelize, DataTypes) => {
     },
     userId: {
       type: DataTypes.UUID,
-      allowNull: false,
-      references: {
-        model: 'Users',
-        key: 'id'
-      }
+      allowNull: false
     },
     
     // Original email identifiers
     originalEmailId: {
       type: DataTypes.STRING,
-      allowNull: false,
-      comment: 'Gmail message ID'
+      allowNull: false
     },
     threadId: {
       type: DataTypes.STRING,
-      allowNull: true,
-      comment: 'Gmail thread ID for grouping'
+      allowNull: true
     },
     
     // CRITICAL: Headers needed for reply threading
     messageId: {
       type: DataTypes.STRING,
-      allowNull: true,
-      comment: 'Original Message-ID header for In-Reply-To'
+      allowNull: true
     },
     references: {
       type: DataTypes.TEXT,
-      allowNull: true,
-      comment: 'References header chain for threading'
+      allowNull: true
     },
     
     // Email content
@@ -64,8 +57,7 @@ module.exports = (sequelize, DataTypes) => {
     },
     editedReply: {
       type: DataTypes.TEXT,
-      allowNull: true,
-      comment: 'User edited version of the reply'
+      allowNull: true
     },
     
     // Status tracking
@@ -87,23 +79,21 @@ module.exports = (sequelize, DataTypes) => {
     // Sent email reference
     sentEmailId: {
       type: DataTypes.STRING,
-      allowNull: true,
-      comment: 'Gmail ID of the sent reply'
+      allowNull: true
     }
   }, {
     tableName: 'Drafts',
     timestamps: true
   });
 
-  Draft.associate = (models) => {
-    Draft.belongsTo(models.User, {
-      foreignKey: 'userId',
-      as: 'user'
-    });
-  };
-
   return Draft;
 };
+
+
+
+
+
+
 
 
 
