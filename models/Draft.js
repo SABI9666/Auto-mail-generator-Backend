@@ -1,6 +1,5 @@
-const { DataTypes } = require('sequelize');
 
-module.exports = (sequelize) => {
+module.exports = (sequelize, DataTypes) => {
   const Draft = sequelize.define('Draft', {
     id: {
       type: DataTypes.UUID,
@@ -15,94 +14,96 @@ module.exports = (sequelize) => {
         key: 'id'
       }
     },
-    emailId: {
+    
+    // Original email identifiers
+    originalEmailId: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: false,
+      comment: 'Gmail message ID'
     },
     threadId: {
       type: DataTypes.STRING,
-      allowNull: true
+      allowNull: true,
+      comment: 'Gmail thread ID for grouping'
     },
+    
+    // CRITICAL: Headers needed for reply threading
+    messageId: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      comment: 'Original Message-ID header for In-Reply-To'
+    },
+    references: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      comment: 'References header chain for threading'
+    },
+    
+    // Email content
     from: {
       type: DataTypes.STRING,
       allowNull: false
     },
     to: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: true
     },
     subject: {
-      type: DataTypes.TEXT,
-      allowNull: false
+      type: DataTypes.STRING,
+      allowNull: true
     },
     originalBody: {
       type: DataTypes.TEXT,
-      allowNull: false
+      allowNull: true
     },
+    
+    // AI Generated content
     generatedReply: {
       type: DataTypes.TEXT,
-      allowNull: false
+      allowNull: true
     },
-    status: {
-      type: DataTypes.ENUM('pending', 'approved', 'rejected', 'sent', 'edited'),
-      defaultValue: 'pending',
-      allowNull: false
-    },
-    approvalToken: {
-      type: DataTypes.STRING,
+    editedReply: {
+      type: DataTypes.TEXT,
       allowNull: true,
-      unique: true
+      comment: 'User edited version of the reply'
     },
+    
+    // Status tracking
+    status: {
+      type: DataTypes.ENUM('pending', 'sent', 'edited', 'rejected'),
+      defaultValue: 'pending'
+    },
+    
+    // Timestamps
     sentAt: {
       type: DataTypes.DATE,
       allowNull: true
+    },
+    rejectedAt: {
+      type: DataTypes.DATE,
+      allowNull: true
+    },
+    
+    // Sent email reference
+    sentEmailId: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      comment: 'Gmail ID of the sent reply'
     }
   }, {
-    timestamps: true,
-    indexes: [
-      {
-        fields: ['userId']
-      },
-      {
-        fields: ['status']
-      },
-      {
-        fields: ['emailId']
-      },
-      {
-        fields: ['approvalToken']
-      }
-    ]
+    tableName: 'Drafts',
+    timestamps: true
   });
+
+  Draft.associate = (models) => {
+    Draft.belongsTo(models.User, {
+      foreignKey: 'userId',
+      as: 'user'
+    });
+  };
 
   return Draft;
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
