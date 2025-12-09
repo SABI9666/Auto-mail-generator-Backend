@@ -1,11 +1,8 @@
-// File: controllers/gmailController.js
 const gmailService = require('../services/gmailService');
 const { User } = require('../models');
 
 const getAuthUrl = async (req, res) => {
   try {
-    // We pass the userId as state to verify it later if needed, 
-    // or simply to generate a unique URL
     const url = gmailService.getAuthUrl();
     res.json({ url });
   } catch (error) {
@@ -17,7 +14,7 @@ const getAuthUrl = async (req, res) => {
 const oauthCallback = async (req, res) => {
   try {
     const { code } = req.query;
-    const userId = req.user.id; // From authMiddleware
+    const userId = req.user.id;
 
     if (!code) {
       return res.status(400).json({ error: 'No authorization code provided' });
@@ -32,8 +29,7 @@ const oauthCallback = async (req, res) => {
     await User.update({
       gmailAccessToken: tokens.access_token,
       gmailRefreshToken: tokens.refresh_token,
-      gmailTokenExpiry: tokens.expiry_date,
-      gmailConnected: true // Flag to show status in dashboard
+      gmailTokenExpiry: tokens.expiry_date
     }, {
       where: { id: userId }
     });
@@ -53,14 +49,14 @@ const disconnect = async (req, res) => {
     await User.update({
       gmailAccessToken: null,
       gmailRefreshToken: null,
-      gmailTokenExpiry: null,
-      gmailConnected: false
+      gmailTokenExpiry: null
     }, {
       where: { id: userId }
     });
     
     res.json({ success: true, message: 'Gmail disconnected' });
   } catch (error) {
+    console.error('Disconnect error:', error);
     res.status(500).json({ error: 'Failed to disconnect' });
   }
 };
@@ -73,6 +69,7 @@ const getStatus = async (req, res) => {
       email: user.email 
     });
   } catch (error) {
+    console.error('Get status error:', error);
     res.status(500).json({ error: 'Failed to get status' });
   }
 };
@@ -83,3 +80,49 @@ module.exports = {
   disconnect,
   getStatus
 };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
