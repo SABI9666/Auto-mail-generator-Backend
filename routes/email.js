@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const authMiddleware = require('../middleware/auth');
 const emailController = require('../controllers/emailController');
-const { User } = require('../models');
+const twilioService = require('../services/twilioService');
+const { User, Draft } = require('../models');
 
 // Scan inbox for new emails (Manual Scan)
 router.post('/scan', authMiddleware, emailController.scanInbox);
@@ -24,6 +25,54 @@ router.post('/drafts/:draftId/reject', authMiddleware, emailController.rejectDra
 
 // Edit and send draft
 router.post('/drafts/:draftId/edit', authMiddleware, emailController.editDraft);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RESEND WHATSAPP NOTIFICATION
+// ═══════════════════════════════════════════════════════════════════════════
+router.post('/drafts/:draftId/resend-notification', authMiddleware, async (req, res) => {
+  try {
+    const { draftId } = req.params;
+    const userId = req.user.id;
+
+    const draft = await Draft.findOne({
+      where: { id: draftId, userId }
+    });
+
+    if (!draft) {
+      return res.status(404).json({ error: 'Draft not found' });
+    }
+
+    const user = await User.findByPk(userId);
+    
+    if (!user.whatsappNumber) {
+      return res.status(400).json({ error: 'No WhatsApp number configured' });
+    }
+
+    const result = await twilioService.sendDraftNotification(
+      user.whatsappNumber,
+      {
+        from: draft.to,
+        subject: draft.subject,
+        originalBody: draft.originalBody,
+        generatedReply: draft.generatedReply,
+        date: draft.createdAt
+      },
+      draft.id
+    );
+
+    if (result.success) {
+      console.log('✅ WhatsApp notification resent for draft:', draftId);
+      res.json({ success: true, message: 'WhatsApp notification sent', messageId: result.messageId });
+    } else {
+      console.log('❌ WhatsApp resend failed:', result.error);
+      res.status(500).json({ error: result.error || 'Failed to send notification' });
+    }
+
+  } catch (error) {
+    console.error('Resend notification error:', error);
+    res.status(500).json({ error: 'Failed to resend notification' });
+  }
+});
 
 // ═══════════════════════════════════════════════════════════════════════════
 // AUTO-SCAN ENDPOINTS
@@ -58,17 +107,14 @@ router.post('/auto-scan/toggle', authMiddleware, async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Check if Gmail is connected
     if (!user.gmailAccessToken || !user.gmailRefreshToken) {
       return res.status(400).json({ error: 'Please connect Gmail first' });
     }
 
-    // Check if WhatsApp number is set (required for auto-scan notifications)
     if (!user.whatsappNumber) {
       return res.status(400).json({ error: 'Please set WhatsApp number in Settings for auto-scan notifications' });
     }
 
-    // Toggle auto-scan
     const newStatus = !user.autoScanEnabled;
     await User.update(
       { autoScanEnabled: newStatus },
@@ -93,7 +139,6 @@ router.put('/auto-scan/interval', authMiddleware, async (req, res) => {
   try {
     const { interval } = req.body;
     
-    // Validate interval (1-60 minutes)
     if (!interval || interval < 1 || interval > 60) {
       return res.status(400).json({ error: 'Interval must be between 1 and 60 minutes' });
     }
@@ -117,63 +162,3 @@ router.put('/auto-scan/interval', authMiddleware, async (req, res) => {
 });
 
 module.exports = router;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
