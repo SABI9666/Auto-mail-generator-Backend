@@ -1,6 +1,9 @@
 const { google } = require('googleapis');
 const { User } = require('../models');
 
+// Log the redirect URI being used (for debugging)
+console.log('📧 Gmail OAuth Redirect URI:', process.env.GMAIL_REDIRECT_URI);
+
 const oauth2Client = new google.auth.OAuth2(
   process.env.GMAIL_CLIENT_ID,
   process.env.GMAIL_CLIENT_SECRET,
@@ -9,11 +12,14 @@ const oauth2Client = new google.auth.OAuth2(
 
 class GmailService {
   getAuthUrl(state) {
-    return oauth2Client.generateAuthUrl({
+    const url = oauth2Client.generateAuthUrl({
       access_type: 'offline',
       scope: ['https://www.googleapis.com/auth/gmail.modify'],
+      prompt: 'consent', // Force consent to always get refresh token
       state: state
     });
+    console.log('🔗 Generated Auth URL:', url);
+    return url;
   }
 
   async getTokens(code) {
@@ -136,8 +142,8 @@ class GmailService {
     return {
       id: message.id,
       threadId: message.threadId,
-      messageId: messageIdHeader,  // Original Message-ID header for replies
-      references: references,       // References header for threading
+      messageId: messageIdHeader,
+      references: references,
       from,
       to,
       subject,
@@ -149,7 +155,7 @@ class GmailService {
     };
   }
 
-  // FIXED: Send email with proper reply threading
+  // Send email with proper reply threading
   async sendEmail(userId, emailData) {
     const gmail = await this.setCredentials(userId);
     
@@ -163,17 +169,15 @@ class GmailService {
       'Content-Type: text/plain; charset=utf-8'
     ];
 
-    // Add reply headers for proper threading (CRITICAL FOR REPLIES)
+    // Add reply headers for proper threading
     if (inReplyTo) {
       emailHeaders.push(`In-Reply-To: ${inReplyTo}`);
     }
     
     if (references) {
-      // Append original message ID to references chain
       const refChain = inReplyTo ? `${references} ${inReplyTo}` : references;
       emailHeaders.push(`References: ${refChain}`);
     } else if (inReplyTo) {
-      // If no references but we have inReplyTo, use that
       emailHeaders.push(`References: ${inReplyTo}`);
     }
 
@@ -191,7 +195,6 @@ class GmailService {
 
     const requestBody = { raw: encodedEmail };
     
-    // Add threadId for Gmail threading
     if (threadId) {
       requestBody.threadId = threadId;
     }
@@ -215,7 +218,6 @@ class GmailService {
 
   // Send reply with proper threading
   async sendReply(userId, emailData) {
-    // Ensure subject has "Re:" prefix
     let subject = emailData.subject || '';
     if (!subject.toLowerCase().startsWith('re:')) {
       subject = `Re: ${subject}`;
@@ -249,17 +251,3 @@ class GmailService {
 }
 
 module.exports = new GmailService();
-
-
-
-
-
-
-
-
-
-
-
-
-
-
